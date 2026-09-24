@@ -239,7 +239,7 @@ final class SelfTestRunner {
 
     private func keyEvent(_ step: Step) throws -> NSEvent {
         let keys: [String: (characters: String, code: UInt16)] = [
-            "space": (" ", 49), "f": ("f", 3), "l": ("l", 37), "m": ("m", 46), "left": ("\u{F702}", 123), "right": ("\u{F703}", 124), "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
+            "space": (" ", 49), "return": ("\r", 36), "f": ("f", 3), "l": ("l", 37), "m": ("m", 46), "left": ("\u{F702}", 123), "right": ("\u{F703}", 124), "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
         ]
         let name = try step.required("key")
         guard let key = keys[name] else { throw SelfTestFailure(description: "unknown key \(name)") }
@@ -465,6 +465,8 @@ final class SelfTestRunner {
             "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
                    "filterChips": model.ui.filter.chips.map { [$0.dimension, $0.value].compactMap { $0 }.joined(separator: " ") },
                    "searchFocused": mainWindow?.firstResponder is NSText, "nowPlaying": model.ui.nowPlayingShown,
+                   "sort": model.ui.songSort.first.map { "\(SongColumn($0)?.rawValue ?? "?")\($0.order == .forward ? "+" : "-")" } ?? "",
+                   "selectionCount": model.ui.songSelection.count,
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
             "windows": ["main": main, "mini": miniState(), "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
