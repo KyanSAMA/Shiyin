@@ -7,6 +7,7 @@ import LocalMusicCore
 //   lmtool lrc <audio-file|.lrc>
 //   lmtool scan <db> [<root>...]      (default roots: the system Music folder minus its Apple Music library)
 //   lmtool decode-check <file|dir>...  (decodes a chunk at the start and at 50% of every file)
+//   lmtool loudness [--album] <file|dir>...  (BS.1770 integrated loudness and sample peak per file)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -133,17 +134,37 @@ func decodeCheck(_ paths: [String]) {
     emit(["files": files.count, "failures": failures])
 }
 
+func loudness(_ arguments: [String]) {
+    let files = audioFiles(arguments.filter { !$0.hasPrefix("--") })
+    var tracks: [[String: Any]] = [], union: [Float] = []
+    for url in files {
+        let clock = ContinuousClock(), start = clock.now
+        do {
+            let r = try LoudnessAnalyzer.analyze(url)
+            let elapsed = (clock.now - start) / .seconds(1)
+            union += r.blockEnergies
+            tracks.append(["path": url.path, "integrated": value(r.integrated), "samplePeakDb": 20 * log10(max(r.samplePeak, 1e-9)),
+                           "seconds": r.seconds, "speed": r.seconds / max(elapsed, 1e-9)])
+        } catch {
+            tracks.append(["path": url.path, "error": "\(error)"])
+        }
+    }
+    emit(arguments.contains("--album") ? ["tracks": tracks, "album": value(LoudnessAnalyzer.integrated(union))] as [String: Any] : tracks)
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
 case "lrc" where arguments.count == 2:
     try await lrc(arguments[1])
+case "loudness" where arguments.count > 1:
+    loudness(Array(arguments.dropFirst()))
 case "decode-check" where arguments.count > 1:
     decodeCheck(Array(arguments.dropFirst()))
 case "scan" where arguments.count >= 2:
     try await scan(arguments[1], Array(arguments.dropFirst(2)))
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>...\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>...\n".utf8))
     exit(64)
 }

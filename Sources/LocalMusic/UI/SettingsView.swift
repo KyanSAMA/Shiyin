@@ -8,7 +8,7 @@ struct SettingsView: View {
     var body: some View {
         Group {
             if let library = model.library {
-                LibrarySettingsView(library: library)
+                LibrarySettingsView(library: library, loudness: model.loudness)
             } else {
                 ContentUnavailableView("无法打开曲库", systemImage: "exclamationmark.triangle", description: Text(model.startupError ?? ""))
             }
@@ -19,6 +19,7 @@ struct SettingsView: View {
 
 private struct LibrarySettingsView: View {
     let library: LibraryModel
+    let loudness: LoudnessModel?
 
     var body: some View {
         Form {
@@ -30,6 +31,13 @@ private struct LibrarySettingsView: View {
                     Spacer()
                     Button("重新扫描") { Task { await library.scan() } }
                         .disabled(library.scanning)
+                }
+            }
+            if let progress = loudness?.progress, progress.total > 0 {
+                Section("响度分析") {
+                    LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
+                    if progress.failed > 0 { LabeledContent("无法分析", value: "\(progress.failed) 首") }
+                    if progress.pending > 0 { ProgressView(value: Double(progress.total - progress.pending), total: Double(progress.total)) }
                 }
             }
         }

@@ -402,6 +402,8 @@ final class SelfTestRunner {
             "library": model.library.map(libraryState) ?? NSNull(),
             "player": model.player.map(playerState) ?? NSNull(),
             "lyrics": model.player.map(lyricsState) ?? NSNull(),
+            "loudness": model.loudness.map { ["analyzed": $0.progress.analyzed, "failed": $0.progress.failed, "total": $0.progress.total,
+                                                "pending": $0.progress.pending] as Step } ?? NSNull(),
             "measure": measures,
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,

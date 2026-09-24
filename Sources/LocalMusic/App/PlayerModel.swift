@@ -26,7 +26,10 @@ import LocalMusicCore
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored private var lyricsTrack: Int64?
+    @ObservationIgnored private var prioritized: [Int64] = []
     @ObservationIgnored var onChange: (() -> Void)?
+    /// The current track, its album and the next queued tracks, so their loudness is analyzed first.
+    @ObservationIgnored var onPriorityChange: (([Int64]) -> Void)?
 
     init(library: LibraryModel, muted: Bool) throws {
         self.library = library
@@ -210,6 +213,7 @@ import LocalMusicCore
         position = engine.position
         loadLyricsIfNeeded()
         updateLyricIndex()
+        prioritizeLoudness()
         if isPlaying, ticker == nil {
             ticker = Task { [weak self] in
                 while !Task.isCancelled {
@@ -251,6 +255,14 @@ import LocalMusicCore
             lyricsLoading = false
             updateLyricIndex()
         }
+    }
+
+    private func prioritizeLoudness() {
+        guard let current else { return }
+        let ids = [current.id] + (library.index.album(containing: current.id)?.trackIDs ?? []) + queue.upcoming.prefix(20).map(\.trackID)
+        guard ids != prioritized else { return }
+        prioritized = ids
+        onPriorityChange?(ids)
     }
 
     private func updateLyricIndex() {

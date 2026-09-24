@@ -121,6 +121,56 @@ public actor LibraryStore {
         if let sidecar = track.sidecarLyrics { try lyrics.run([id, "sidecar", sidecar]) }
     }
 
+    // MARK: Loudness
+
+    /// Tracks without a loudness row for their current file stamp and analyzer version.
+    func loudnessPending() throws -> [LoudnessJob] {
+        try db.query("""
+            SELECT t.id, t.path, t.file_size, t.file_mtime FROM track t LEFT JOIN loudness l ON l.track_id = t.id
+            WHERE t.scan_error IS NULL AND (l.track_id IS NULL OR l.file_size != t.file_size OR l.file_mtime != t.file_mtime
+                  OR l.analyzer_version != ?)
+            """, [LoudnessAnalyzer.version]) {
+            LoudnessJob(trackID: $0.int64(0)!, url: URL(filePath: $0.string(1)!), size: $0.int64(2)!, mtime: $0.double(3)!)
+        }
+    }
+
+    /// A failure is recorded too, so an undecodable file isn't retried until it changes. Silently skipped when the
+    /// track was deleted meanwhile.
+    func saveLoudness(_ job: LoudnessJob, _ result: Result<LoudnessResult, Error>) throws {
+        let (integrated, peak, blocks, error): (Double?, Double?, Data?, String?) = switch result {
+        case .success(let r): (r.integrated, r.samplePeak, r.blockEnergies.withUnsafeBytes { Data($0) }, nil)
+        case .failure(let e): (nil, nil, nil, String(describing: e))
+        }
+        try db.run("""
+            INSERT OR REPLACE INTO loudness(track_id, file_size, file_mtime, analyzer_version, integrated_lufs, sample_peak,
+                                            block_energies, analyzed_at, error)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM track WHERE id = ?)
+            """, [job.trackID, job.size, job.mtime, LoudnessAnalyzer.version, integrated, peak, blocks,
+                  Date().timeIntervalSince1970, error, job.trackID])
+    }
+
+    /// Successful analyses of the tracks' current files only.
+    public func loudness(for ids: [Int64]) throws -> [Int64: LoudnessRecord] {
+        guard !ids.isEmpty else { return [:] }
+        let rows = try db.query("""
+            SELECT l.track_id, l.integrated_lufs, l.sample_peak, l.block_energies FROM loudness l
+            JOIN track t ON t.id = l.track_id AND t.file_size = l.file_size AND t.file_mtime = l.file_mtime
+            WHERE l.error IS NULL AND l.analyzer_version = ? AND l.track_id IN (\(ids.map(String.init).joined(separator: ",")))
+            """, [LoudnessAnalyzer.version]) { r in
+            (r.int64(0)!, LoudnessRecord(integrated: r.double(1), samplePeak: r.double(2)!,
+                                         blockEnergies: r.data(3).map { data in data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) } } ?? []))
+        }
+        return Dictionary(uniqueKeysWithValues: rows)
+    }
+
+    func loudnessProgress() throws -> LoudnessService.Progress {
+        try db.query("""
+            SELECT COUNT(l.track_id) - COUNT(l.error), COUNT(l.error), COUNT(*) FROM track t LEFT JOIN loudness l
+            ON l.track_id = t.id AND l.file_size = t.file_size AND l.file_mtime = t.file_mtime AND l.analyzer_version = ?
+            WHERE t.scan_error IS NULL
+            """, [LoudnessAnalyzer.version]) { LoudnessService.Progress(analyzed: $0.int(0)!, failed: $0.int(1)!, total: $0.int(2)!) }[0]
+    }
+
     /// A sidecar `.lrc` wins over embedded lyrics, so lyrics can be fixed without touching the audio file.
     public func lyrics(for trackID: Int64) throws -> Lyrics? {
         // An empty or header-only sidecar parses to nil and must not hide embedded lyrics.

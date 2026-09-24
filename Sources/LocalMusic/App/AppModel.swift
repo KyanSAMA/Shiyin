@@ -93,6 +93,7 @@ enum Route: Hashable {
     let ui = UIState()
     let library: LibraryModel?
     let player: PlayerModel?
+    let loudness: LoudnessModel?
     let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
@@ -102,16 +103,23 @@ enum Route: Hashable {
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
         artwork = ArtworkStore(cache: ArtworkCache(directory: paths.cache.appending(path: "artwork")))
-        var library: LibraryModel?, player: PlayerModel?
+        var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?
         do {
-            library = LibraryModel(store: try LibraryStore(url: paths.database))
+            let store = try LibraryStore(url: paths.database)
+            library = LibraryModel(store: store)
             player = try PlayerModel(library: library!, muted: options.isSelfTest)
-            library?.onReload = { [weak player] in player?.libraryReloaded() }
+            loudness = LoudnessModel(service: LoudnessService(store: store))
+            library?.onReload = { [weak player, weak loudness] in
+                player?.libraryReloaded()
+                loudness?.refresh()
+            }
+            player?.onPriorityChange = { [weak loudness] in loudness?.prioritize($0) }
         } catch {
             startupError = String(describing: error)
         }
         self.library = library
         self.player = player
+        self.loudness = loudness
         if !options.isSelfTest { enableNowPlaying() }
     }
 

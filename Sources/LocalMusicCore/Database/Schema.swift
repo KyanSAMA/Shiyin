@@ -35,6 +35,12 @@ enum Schema {
           PRIMARY KEY(track_id, source)) WITHOUT ROWID;
         CREATE TABLE setting(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
         """,
+        """
+        CREATE TABLE loudness(
+          track_id INTEGER PRIMARY KEY REFERENCES track(id) ON DELETE CASCADE,
+          file_size INTEGER NOT NULL, file_mtime REAL NOT NULL, analyzer_version INTEGER NOT NULL,
+          integrated_lufs REAL, sample_peak REAL, block_energies BLOB, analyzed_at REAL NOT NULL, error TEXT);
+        """,
     ]
 
     static func migrate(_ db: Database) throws {

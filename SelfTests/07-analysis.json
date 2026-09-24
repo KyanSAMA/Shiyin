@@ -1,0 +1,17 @@
+{
+  "timeout": 90,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "waitUntil", "path": "loudness.total", "equals": 11, "timeout": 10 },
+    { "do": "waitUntil", "path": "loudness.pending", "equals": 0, "timeout": 40 },
+    { "do": "assert", "path": "loudness.failed", "equals": 0 },
+    { "do": "fs", "op": "copy", "from": "@fixtures/extra/新歌.flac", "to": "@out/lib/新歌.flac" },
+    { "do": "waitUntil", "path": "library.trackCount", "equals": 12, "timeout": 10 },
+    { "do": "waitUntil", "path": "loudness.analyzed", "equals": 12, "timeout": 20 },
+    { "do": "openSettings" },
+    { "do": "snapshot", "name": "settings", "window": "settings" },
+    { "do": "state", "name": "end" }
+  ]
+}

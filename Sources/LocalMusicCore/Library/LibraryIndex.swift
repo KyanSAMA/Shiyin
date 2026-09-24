@@ -30,11 +30,13 @@ public struct LibraryIndex: Sendable {
     public let composers: [PersonGroup]
     public let tracks: [Int64: TrackRow]
     private let searchKeys: [Int64: String]
+    private let albumOfTrack: [Int64: Int]
 
     public init(rows: [TrackRow]) {
         songs = rows.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         tracks = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
         albums = Self.albums(songs)
+        albumOfTrack = Dictionary(uniqueKeysWithValues: albums.enumerated().flatMap { i, album in album.trackIDs.map { ($0, i) } })
         artists = Self.people(songs, \.artists)
         composers = Self.people(songs, \.composers)
         searchKeys = Dictionary(uniqueKeysWithValues: rows.map {
@@ -72,6 +74,7 @@ public struct LibraryIndex: Sendable {
     }
 
     public func album(_ id: String) -> AlbumGroup? { albums.first { $0.id == id } }
+    public func album(containing trackID: Int64) -> AlbumGroup? { albumOfTrack[trackID].map { albums[$0] } }
     public func person(_ role: PersonRole, _ id: String) -> PersonGroup? { people(role).first { $0.id == id } }
 
     /// DISCNUMBER, else a disc folder's number (CD1, Disc 2), else 1.
