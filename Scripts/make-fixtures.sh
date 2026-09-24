@@ -1,12 +1,13 @@
 #!/bin/bash
 # Generate the deterministic self-test library in .build/fixtures (skipped when already current).
 # Requires ffmpeg and metaflac. Layout:
-#   library/   9 playable files across FLAC 44.1/96/192 kHz, ID3v2.3/2.4 MP3, ALAC M4A, WAV, untagged, sidecar LRC
+#   library/   11 playable files across FLAC 44.1/96/192 kHz, ID3v2.3/2.4 MP3, ALAC M4A, WAV, untagged, sidecar LRC,
+#              and a gapless pair (one 375 Hz tone split mid-buffer, 12 s = whole periods)
 #   library/Music/  a file the self-tests exclude;  library/junk/  non-audio files the scanner must ignore
 #   extra/     files copied in at runtime to exercise FSEvents
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=1
+VERSION=2
 OUT=.build/fixtures
 [ "$(cat "$OUT/.version" 2>/dev/null)" = "$VERSION" ] && exit 0
 rm -rf "$OUT"
@@ -65,6 +66,14 @@ audio "$LIB/wav/untagged.wav" 2 44100 "-c:a pcm_s16le" -
 audio "$LIB/53.无标签标题.flac" 2 44100 "$FLAC16" -
 audio "$LIB/sidecar/歌.flac" 3 44100 "$FLAC16" -
 printf '[00:00.50]侧边歌词第一行\n[00:01.50]第二行\n' > "$LIB/sidecar/歌.lrc"
+
+for part in 1 2; do
+  trim=$([ $part = 1 ] && echo "end_sample=264601" || echo "start_sample=264601")
+  mkdir -p "$LIB/Gapless"
+  ff -f lavfi -i "sine=frequency=375:sample_rate=48000:duration=12" -af "atrim=$trim" $FLAC16 \
+    -metadata title="Part $part" -metadata artist="Test Tone" -metadata ALBUMARTIST="Test Tone" -metadata album=Gapless \
+    -metadata track=$part/2 "$LIB/Gapless/0$part Part $part.flac"
+done
 
 audio "$LIB/Music/excluded.flac" 1 44100 "$FLAC16" -
 mkdir -p "$LIB/junk"

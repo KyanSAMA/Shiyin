@@ -1,5 +1,6 @@
 import AppKit
 import LocalMusicCore
+import MediaPlayer
 
 struct SelfTestFailure: Error, CustomStringConvertible {
     let description: String
@@ -25,6 +26,7 @@ final class SelfTestRunner {
     private let watchdog = Watchdog()
     private let started = Date()
     private var snapshots: [String: Any] = [:]
+    private var measures: [String: Any] = [:]
     private var fileCounter = 0
 
     init(model: AppModel) {
@@ -96,6 +98,36 @@ final class SelfTestRunner {
             try await library().scan()
         case "fs":
             try fileOperation(step)
+        case "play":
+            try play(step)
+        case "togglePlayPause":
+            try player().togglePlayPause()
+        case "pause":
+            try player().pause()
+        case "resume":
+            try player().resume()
+        case "next":
+            try player().next()
+        case "previous":
+            try player().previous()
+        case "seek":
+            try player().seek(to: step.number("seconds") ?? 0)
+        case "setShuffle":
+            try player().setShuffle(step["value"] as? Bool ?? true)
+        case "setRepeat":
+            guard let mode = RepeatMode(rawValue: try step.required("value")) else { throw SelfTestFailure(description: "bad repeat mode") }
+            try player().setRepeat(mode)
+        case "measure":
+            let engine = try player().engine
+            engine.meter.reset()
+            engine.metering = true
+            try await Task.sleep(for: .seconds(step.number("seconds") ?? 2))
+            engine.metering = false
+            let r = engine.meter.reading
+            measures[try step.required("name")] = ["seconds": r.seconds, "rmsDbfs": r.rmsDbfs, "peakDbfs": r.peakDbfs,
+                                                   "maxStep": r.maxStep, "longestGapMs": r.longestGapMs]
+        case "enableNowPlaying":
+            model.enableNowPlaying()
         case "openSettings":
             model.ui.openSettings?()
             let deadline = Date().addingTimeInterval(5)
@@ -110,6 +142,24 @@ final class SelfTestRunner {
         default:
             throw SelfTestFailure(description: "unknown action")
         }
+    }
+
+    private func player() throws -> PlayerModel {
+        guard let player = model.player else { throw SelfTestFailure(description: "player unavailable: \(model.startupError ?? "")") }
+        return player
+    }
+
+    /// Plays the first song matching `title` / `format` / `minSampleRate`, queued with its album (default) or all songs.
+    private func play(_ step: Step) throws {
+        let index = try library().index
+        guard let song = index.songs.first(where: { row in
+            (step.string("title").map { row.title == $0 } ?? true)
+                && (step.string("format").map { row.format == $0 } ?? true)
+                && (step.number("minSampleRate").map { Double(row.sampleRate ?? 0) >= $0 } ?? true)
+        }) else { throw SelfTestFailure(description: "no song matches \(step)") }
+        let queue = step.string("context") == "songs" ? index.songs.map(\.id)
+            : index.albums.first { $0.trackIDs.contains(song.id) }?.trackIDs ?? [song.id]
+        try player().play(queue, startAt: queue.firstIndex(of: song.id) ?? 0)
     }
 
     private func library() throws -> LibraryModel {
@@ -245,6 +295,9 @@ final class SelfTestRunner {
             "ui": ["sidebar": model.ui.sidebar.rawValue],
             "windows": ["main": main],
             "library": model.library.map(libraryState) ?? NSNull(),
+            "player": model.player.map(playerState) ?? NSNull(),
+            "measure": measures,
+            "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],
         ]
@@ -263,6 +316,28 @@ final class SelfTestRunner {
                  "failureCount": $0.failures.count, "ms": $0.milliseconds] as Step
             } ?? NSNull(),
         ]
+    }
+
+    private func playerState(_ player: PlayerModel) -> Step {
+        let engine = player.engine
+        return [
+            "title": player.current?.title as Any? ?? NSNull(), "trackId": player.current?.id as Any? ?? NSNull(),
+            "isPlaying": player.isPlaying, "position": player.position, "duration": player.duration,
+            "fileSampleRate": engine.fileSampleRate, "outputSampleRate": engine.outputSampleRate,
+            "volume": player.volume, "engineVolume": engine.volume, "lastError": player.lastError as Any? ?? NSNull(),
+            "queue": ["count": player.queue.entries.count, "index": player.queue.index as Any? ?? NSNull(),
+                      "trackIds": player.queue.entries.map(\.trackID), "shuffled": player.queue.shuffled,
+                      "repeat": player.queue.repeatMode.rawValue] as Step,
+        ]
+    }
+
+    private func nowPlayingState() -> Any {
+        guard let info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return NSNull() }
+        return [
+            "title": info[MPMediaItemPropertyTitle] as? String ?? "",
+            "elapsed": info[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double ?? -1,
+            "rate": info[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? -1,
+        ] as Step
     }
 
     private func finish(status: String, error: String?) {

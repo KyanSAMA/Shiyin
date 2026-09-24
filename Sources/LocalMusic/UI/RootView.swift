@@ -65,32 +65,36 @@ struct DetailView: View {
 }
 
 struct SongsTableView: View {
+    @Environment(AppModel.self) private var model
     let songs: [TrackRow]
 
     var body: some View {
-        Table(songs) {
-            TableColumn("标题", value: \.title)
+        let ui = model.ui
+        let playing = model.player?.current?.id
+        Table(songs, selection: Binding(get: { ui.songSelection }, set: { ui.songSelection = $0 })) {
+            TableColumn("标题") { row in
+                HStack(spacing: 6) {
+                    if row.id == playing {
+                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 10)).foregroundStyle(.tint)
+                    }
+                    Text(row.title)
+                }
+            }
             TableColumn("艺人") { Text($0.artistText) }
             TableColumn("专辑") { Text($0.album ?? "") }
-            TableColumn("时长") { Text(Duration.seconds($0.duration).formatted(.time(pattern: .minuteSecond))).monospacedDigit() }
+            TableColumn("时长") { Text(clock($0.duration)).monospacedDigit() }
                 .width(56)
         }
-    }
-}
-
-struct PlayerBarView: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.quaternary)
-                .frame(width: 44, height: 44)
-                .overlay { Image(systemName: "music.note").foregroundStyle(.secondary) }
-            Text("未在播放")
-                .foregroundStyle(.secondary)
-            Spacer()
+        .contextMenu(forSelectionType: TrackRow.ID.self) { ids in
+            Button("播放下一首") { model.player?.playNext(ordered(ids)) }
+            Button("添加到队列") { model.player?.addToQueue(ordered(ids)) }
+        } primaryAction: { ids in
+            guard let start = songs.firstIndex(where: { ids.contains($0.id) }) else { return }
+            model.player?.play(songs.map(\.id), startAt: start)
         }
-        .padding(.horizontal, 16)
-        .frame(height: 64)
-        .background(.bar)
+    }
+
+    private func ordered(_ ids: Set<TrackRow.ID>) -> [Int64] {
+        songs.map(\.id).filter(ids.contains)
     }
 }

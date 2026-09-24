@@ -51,6 +51,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 @Observable final class UIState {
     var sidebar: SidebarItem = .songs
+    var songSelection: Set<Int64> = []
     /// Captured from the view environment so non-view code (menus, self-tests) can open Settings.
     @ObservationIgnored var openSettings: OpenSettingsAction?
 }
@@ -62,18 +63,32 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     let paths: AppPaths
     let ui = UIState()
     let library: LibraryModel?
+    let player: PlayerModel?
+    @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
 
     init(options: LaunchOptions) {
         precondition(!options.isSelfTest || (options.dataDir != nil && options.outDir != nil), "--selftest requires --out and --data-dir")
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
+        var library: LibraryModel?, player: PlayerModel?
         do {
             library = LibraryModel(store: try LibraryStore(url: paths.database))
+            player = try PlayerModel(library: library!, muted: options.isSelfTest)
         } catch {
-            library = nil
             startupError = String(describing: error)
         }
+        self.library = library
+        self.player = player
+        if !options.isSelfTest { enableNowPlaying() }
+    }
+
+    /// Registers media keys / Control Center. Self-tests opt in explicitly so they never grab the user's media keys.
+    func enableNowPlaying() {
+        guard let player, nowPlaying == nil else { return }
+        let bridge = NowPlayingBridge(player: player)
+        nowPlaying = bridge
+        player.onChange = { [unowned player] in bridge.update(player) }
     }
 
     /// Self-tests start the library themselves, with their own roots.

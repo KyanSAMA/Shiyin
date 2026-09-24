@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 import LocalMusicCore
 
@@ -5,6 +6,7 @@ import LocalMusicCore
 //   lmtool tags [--stats] [--sha] <file|dir>...
 //   lmtool lrc <audio-file|.lrc>
 //   lmtool scan <db> [<root>...]      (default roots: the system Music folder minus its Apple Music library)
+//   lmtool decode-check <file|dir>...  (decodes a chunk at the start and at 50% of every file)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -113,15 +115,35 @@ func scan(_ database: String, _ roots: [String]) async throws {
           "albumList": index.albums.map { "\($0.title) — \($0.artist) (\($0.trackIDs.count))" }])
 }
 
+func decodeCheck(_ paths: [String]) {
+    var failures: [String] = []
+    let files = audioFiles(paths)
+    for url in files {
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096)!
+            try file.read(into: buffer)
+            file.framePosition = file.length / 2
+            try file.read(into: buffer)
+            guard buffer.frameLength > 0 else { throw TagError.truncated }
+        } catch {
+            failures.append("\(url.path): \(error)")
+        }
+    }
+    emit(["files": files.count, "failures": failures])
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
 case "lrc" where arguments.count == 2:
     try await lrc(arguments[1])
+case "decode-check" where arguments.count > 1:
+    decodeCheck(Array(arguments.dropFirst()))
 case "scan" where arguments.count >= 2:
     try await scan(arguments[1], Array(arguments.dropFirst(2)))
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...]\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>...\n".utf8))
     exit(64)
 }

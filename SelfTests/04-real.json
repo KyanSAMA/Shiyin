@@ -1,0 +1,23 @@
+{
+  "timeout": 90,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "play", "format": "flac", "minSampleRate": 192000, "context": "songs" },
+    { "do": "waitUntil", "path": "player.isPlaying", "equals": true, "timeout": 5 },
+    { "do": "measure", "name": "hires", "seconds": 1.5 },
+    { "do": "assert", "path": "player.fileSampleRate", "equals": 192000 },
+    { "do": "assert", "path": "measure.hires.rmsDbfs", "gt": -60 },
+    { "do": "assert", "path": "player.position", "gt": 1 },
+    { "do": "play", "format": "mp3", "context": "songs" },
+    { "do": "measure", "name": "mp3", "seconds": 1.5 },
+    { "do": "assert", "path": "measure.mp3.rmsDbfs", "gt": -60 },
+    { "do": "assert", "path": "player.position", "gt": 1 },
+    { "do": "play", "format": "wav", "context": "songs" },
+    { "do": "measure", "name": "wav", "seconds": 1.5 },
+    { "do": "assert", "path": "measure.wav.rmsDbfs", "gt": -60 },
+    { "do": "assert", "path": "player.position", "gt": 1 },
+    { "do": "snapshot", "name": "playing" },
+    { "do": "state", "name": "end" }
+  ]
+}
