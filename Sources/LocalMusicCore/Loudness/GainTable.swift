@@ -21,6 +21,9 @@ public struct GainTable: Sendable, Equatable {
         if !sorted.isEmpty { fallback = min((sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2, 0) }
     }
 
+    /// Whether the track has a gain of its own rather than the fallback.
+    public func isMeasured(_ track: Int64) -> Bool { tracks[track] != nil }
+
     /// Album mode uses the track gain until the whole album is analyzed.
     public func gainDb(_ track: Int64, _ mode: NormalizationMode) -> Double {
         switch mode {

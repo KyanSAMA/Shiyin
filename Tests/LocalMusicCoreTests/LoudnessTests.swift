@@ -220,8 +220,9 @@ struct LoudnessServiceTests {
         #expect(abs(gains.gainDb(ids[0], .track) - 9.09) < 0.05)
         #expect(gains.gainDb(ids[1], .track) == 12)   // +29 dB clamped
         // The quiet track's blocks fall below the album's relative gate, so the album plays at the loud track's level;
-        // the undecodable track doesn't hold the album gain back.
-        #expect(ids.allSatisfy { abs(gains.gainDb($0, .album) - 9.09) < 0.05 })
+        // the undecodable track doesn't hold the album gain back, but isn't boosted by it either.
+        #expect(ids.prefix(2).allSatisfy { abs(gains.gainDb($0, .album) - 9.09) < 0.05 })
+        #expect(gains.gainDb(ids[2], .album) == 0)
         #expect(gains.gainDb(ids[0], .off) == 0)
 
         // Re-analysis replaces the cached album gain: −27.09 and −21.07 LUFS tracks pool to −23.11.

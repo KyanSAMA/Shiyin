@@ -113,7 +113,7 @@ enum Route: Hashable {
                 player?.libraryReloaded()
                 if let library { loudness?.refresh(library.index) }
             }
-            loudness?.onGainsChange = { [weak player] in player?.gainsChanged() }
+            loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
         } catch {
             startupError = String(describing: error)
         }

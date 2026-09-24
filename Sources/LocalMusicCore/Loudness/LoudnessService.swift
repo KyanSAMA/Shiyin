@@ -129,7 +129,8 @@ public actor LoudnessService {
                 gains[ids] = AlbumGain(members: members, gainDb: GainTable.gain(integrated: integrated, peak: members.compactMap(\.samplePeak).max()!))
             }
             albumGains = gains
-            for (ids, album) in gains { for id in ids { table.albums[id] = album.gainDb } }
+            // A failed track's peak is unknown, so it stays on the fallback rather than risk an album boost.
+            for (ids, album) in gains { for id in ids where table.isMeasured(id) { table.albums[id] = album.gainDb } }
             continuation.yield(Update(progress: progress, gains: table))
         } while republish
         publishing = false

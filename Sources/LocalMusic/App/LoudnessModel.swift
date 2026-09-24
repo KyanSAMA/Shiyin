@@ -8,8 +8,8 @@ import LocalMusicCore
     @ObservationIgnored private var gains = GainTable()
     @ObservationIgnored private let service: LoudnessService
     @ObservationIgnored private let store: LibraryStore
-    /// The mode or the gains changed, so the playing items' gains need re-evaluating.
-    @ObservationIgnored var onGainsChange: (() -> Void)?
+    /// The gains (false) or the mode (true) changed, so the playing items' gains need re-evaluating.
+    @ObservationIgnored var onGainsChange: ((_ modeChanged: Bool) -> Void)?
     private static let modeKey = "normalization"
 
     init(store: LibraryStore) {
@@ -21,7 +21,7 @@ import LocalMusicCore
                 progress = update.progress
                 if update.gains != gains {
                     gains = update.gains
-                    onGainsChange?()
+                    onGainsChange?(false)
                 }
             }
         }
@@ -39,11 +39,15 @@ import LocalMusicCore
 
     private func apply(_ mode: NormalizationMode) {
         self.mode = mode
-        onGainsChange?()
+        onGainsChange?(true)
     }
 
     func gainDb(for track: Int64) -> Float {
         Float(gains.gainDb(track, mode))
+    }
+
+    func isMeasured(_ track: Int64) -> Bool {
+        gains.isMeasured(track)
     }
 
     /// Titled albums get an album gain; untitled tracks grouped per artist don't form one.

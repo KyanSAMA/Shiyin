@@ -45,7 +45,7 @@ private struct LibrarySettingsView: View {
                 } header: {
                     Text("响度均衡")
                 } footer: {
-                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益。")
+                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益（只降不升）。")
                         .foregroundStyle(.secondary)
                 }
             }

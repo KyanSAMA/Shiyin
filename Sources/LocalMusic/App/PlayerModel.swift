@@ -126,8 +126,14 @@ import LocalMusicCore
         sync()
     }
 
-    func gainsChanged() {
-        engine.updateGains { gainDb(for: $0.trackID) }
+    /// The playing track leaves the fallback only for its own analysis or a mode change, not for the median drifting as
+    /// other tracks get analyzed.
+    func gainsChanged(modeChanged: Bool) {
+        let playing = engine.current?.entryID
+        engine.updateGains { item in
+            if item.entryID == playing, !modeChanged, loudness?.isMeasured(item.trackID) == false { return item.gainDb }
+            return gainDb(for: item.trackID)
+        }
     }
 
     func setVolume(_ value: Float) {
