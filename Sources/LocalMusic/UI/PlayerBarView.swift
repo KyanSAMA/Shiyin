@@ -16,7 +16,7 @@ struct PlayerBarView: View {
                 }
                 .frame(maxWidth: 520)
                 Spacer(minLength: 0)
-                PageToggles(ui: model.ui, hasTrack: player.current != nil)
+                PageToggles(model: model, hasTrack: player.current != nil)
                 if let loudness = model.loudness { NormalizationMenu(loudness: loudness) }
                 VolumeControl(player: player)
                     .frame(width: 130)
@@ -87,16 +87,20 @@ private struct TransportControls: View {
 }
 
 private struct PageToggles: View {
-    let ui: UIState
+    let model: AppModel
     let hasTrack: Bool
 
     var body: some View {
+        let ui = model.ui
         HStack(spacing: 14) {
             Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble").labelStyle(.iconOnly) }
                 .foregroundStyle(ui.nowPlayingShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .disabled(!hasTrack)
             Button { ui.queueShown.toggle() } label: { Label("播放队列", systemImage: "list.bullet").labelStyle(.iconOnly) }
                 .foregroundStyle(ui.queueShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            Button { model.setMiniPlayer(!model.miniPlayerShown) } label: { Label("迷你播放器", systemImage: "pip.enter").labelStyle(.iconOnly) }
+                .foregroundStyle(model.miniPlayerShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .help("迷你播放器（⌥⌘M）")
         }
         .buttonStyle(.plain)
         .font(.system(size: 14))

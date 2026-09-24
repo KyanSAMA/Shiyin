@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftUI
@@ -112,8 +113,17 @@ enum Route: Hashable {
     /// rows (2.5 s to clear a search over 322 songs).
     var listID: [AnyHashable] { [search, filter] }
 
-    /// Captured from the view environment so non-view code (menus, self-tests) can open Settings.
+    /// Bumped by ⌘F; the root view moves focus into the search field.
+    private(set) var searchFocusRequests = 0
+
+    func focusSearch() {
+        nowPlayingShown = false
+        searchFocusRequests += 1
+    }
+
+    /// Captured from the view environment so non-view code (menus, the mini player, self-tests) can open windows.
     @ObservationIgnored var openSettings: OpenSettingsAction?
+    @ObservationIgnored var openWindow: OpenWindowAction?
 }
 
 @Observable final class AppModel {
@@ -128,6 +138,8 @@ enum Route: Hashable {
     let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
+    private(set) var miniPlayerShown = false
+    @ObservationIgnored private var miniPanel: NSPanel?
 
     init(options: LaunchOptions) {
         precondition(!options.isSelfTest || (options.dataDir != nil && options.outDir != nil), "--selftest requires --out and --data-dir")
@@ -152,6 +164,47 @@ enum Route: Hashable {
         self.player = player
         self.loudness = loudness
         if !options.isSelfTest { enableNowPlaying() }
+        // AppKit retains the monitor and calls it on the main thread.
+        _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] in self?.handleKey($0) ?? $0 }
+    }
+
+    /// Runs before menu key equivalents. Space plays / pauses in the library window (as a bare-space menu shortcut it
+    /// would swallow spaces typed into the search field); while text is being edited, ⌘-arrows (the skip and volume
+    /// shortcuts) go straight to the field to move the caret. Returns the event if it should continue.
+    func handleKey(_ event: NSEvent) -> NSEvent? {
+        guard let window = event.window else { return event }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
+        if window.firstResponder is NSText {
+            guard modifiers == .command, (123...126).contains(event.keyCode) else { return event }
+            window.sendEvent(event)
+            return nil
+        }
+        guard event.keyCode == 49, modifiers.isEmpty, window.isLibraryWindow, let player, player.queue.current != nil else { return event }
+        if !event.isARepeat { player.togglePlayPause() }
+        return nil
+    }
+
+    func setMiniPlayer(_ shown: Bool) {
+        if shown {
+            guard let player else { return }
+            let panel = miniPanel ?? .miniPlayer(self, player: player)
+            miniPanel = panel
+            panel.orderFrontRegardless()
+        } else {
+            miniPanel?.orderOut(nil)
+        }
+        miniPlayerShown = shown
+    }
+
+    func showMainWindow() {
+        NSApp.activate()
+        ui.openWindow?(id: "main")
+    }
+
+    /// ⌘F: unlike `UIState.focusSearch`, also brings the library window forward (e.g. from Settings).
+    func searchFromMenu() {
+        ui.openWindow?(id: "main")
+        ui.focusSearch()
     }
 
     /// Registers media keys / Control Center. Self-tests opt in explicitly so they never grab the user's media keys.
@@ -167,4 +220,9 @@ enum Route: Hashable {
         guard !options.isSelfTest else { return }
         await library?.start()
     }
+}
+
+extension NSWindow {
+    /// The main library window (SwiftUI names it after the scene id "main").
+    var isLibraryWindow: Bool { identifier?.rawValue.hasPrefix("main") == true }
 }

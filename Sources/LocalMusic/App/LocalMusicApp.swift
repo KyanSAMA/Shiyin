@@ -11,6 +11,7 @@ struct LocalMusicApp: App {
                 .environment(AppModel.shared)
         }
         .defaultSize(width: 1200, height: 760)
+        .commands { AppCommands(model: .shared) }
 
         Settings {
             SettingsView()
@@ -25,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.accessory)
         }
     }
+
+    /// Playback (and the mini player) outlive the main window; the Dock icon or 显示主窗口 brings it back.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard LaunchOptions.current.isSelfTest else { return }

@@ -182,6 +182,27 @@ final class SelfTestRunner {
         case "showNowPlaying":
             model.ui.nowPlayingShown = step["value"] as? Bool ?? true
             try await settle()
+        case "miniPlayer":
+            model.setMiniPlayer(step["value"] as? Bool ?? true)
+            try await settle()
+        case "focusSearch":
+            model.ui.focusSearch()
+            try await settle()
+        case "pressKey":
+            // The route of the active app (AppKit skips key equivalents for the inactive self-test app): key monitor,
+            // the window's key equivalents, the menu's, then the window.
+            let event = try keyEvent(step), window = try window()
+            if let unhandled = model.handleKey(event), !window.performKeyEquivalent(with: unhandled),
+               NSApp.mainMenu?.performKeyEquivalent(with: unhandled) != true {
+                window.sendEvent(unhandled)
+            }
+            try await settle()
+        case "closeMainWindow":
+            try window().performClose(nil)
+            try await settle()
+        case "openMainWindow":
+            model.ui.openWindow?(id: "main")
+            try await settle()
         case "showQueue":
             model.ui.queueShown = step["value"] as? Bool ?? true
             try await settle()
@@ -207,6 +228,26 @@ final class SelfTestRunner {
         default:
             throw SelfTestFailure(description: "unknown action")
         }
+    }
+
+    private func keyEvent(_ step: Step) throws -> NSEvent {
+        let keys: [String: (characters: String, code: UInt16)] = [
+            "space": (" ", 49), "f": ("f", 3), "l": ("l", 37), "m": ("m", 46), "left": ("\u{F702}", 123), "right": ("\u{F703}", 124), "down": ("\u{F701}", 125), "up": ("\u{F700}", 126),
+        ]
+        let name = try step.required("key")
+        guard let key = keys[name] else { throw SelfTestFailure(description: "unknown key \(name)") }
+        var flags: NSEvent.ModifierFlags = key.code >= 123 ? [.function, .numericPad] : []
+        for modifier in step["modifiers"] as? [String] ?? [] {
+            guard let flag = ["command": NSEvent.ModifierFlags.command, "shift": .shift, "option": .option][modifier] else {
+                throw SelfTestFailure(description: "unknown modifier \(modifier)")
+            }
+            flags.insert(flag)
+        }
+        guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                           windowNumber: try window().windowNumber, context: nil, characters: key.characters,
+                                           charactersIgnoringModifiers: key.characters, isARepeat: step["repeat"] as? Bool ?? false, keyCode: key.code)
+        else { throw SelfTestFailure(description: "cannot make key event") }
+        return event
     }
 
     private func comparator(_ column: String, ascending: Bool) throws -> KeyPathComparator<TrackRow> {
@@ -351,13 +392,13 @@ final class SelfTestRunner {
     // MARK: Capture
 
     private var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("main") == true }
+        NSApp.windows.first(where: \.isLibraryWindow)
             ?? NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
     }
 
     private func window(_ name: String = "main") throws -> NSWindow {
         let window = name == "main" ? mainWindow : NSApp.windows.first {
-            $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || $0.title.contains("设置"))
+            $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || name == "settings" && $0.title.contains("设置"))
         }
         guard let window else { throw SelfTestFailure(description: "\(name) window not found") }
         return window
@@ -422,8 +463,9 @@ final class SelfTestRunner {
                     "storeOpen": model.library != nil, "isActive": NSApp.isActive],
             "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
                    "filterChips": model.ui.filter.chips.map { [$0.dimension, $0.value].compactMap { $0 }.joined(separator: " ") },
+                   "searchFocused": mainWindow?.firstResponder is NSText, "nowPlaying": model.ui.nowPlayingShown,
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
-            "windows": ["main": main, "scrolls": scrollOffsets()],
+            "windows": ["main": main, "mini": miniState(), "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
             "player": model.player.map(playerState) ?? NSNull(),
             "lyrics": model.player.map(lyricsState) ?? NSNull(),
@@ -434,6 +476,13 @@ final class SelfTestRunner {
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],
         ]
+    }
+
+    private func miniState() -> Any {
+        guard let panel = NSApp.windows.first(where: { $0.identifier?.rawValue == "mini" }) as? NSPanel else { return NSNull() }
+        return ["number": panel.windowNumber, "visible": panel.isVisible, "floating": panel.level == .floating,
+                "allSpaces": panel.collectionBehavior.contains(.canJoinAllSpaces), "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
+                "hidesOnDeactivate": panel.hidesOnDeactivate, "width": panel.frame.width, "height": panel.frame.height] as Step
     }
 
     private func libraryState(_ library: LibraryModel) -> Step {

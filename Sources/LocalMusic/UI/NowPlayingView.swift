@@ -42,7 +42,7 @@ struct NowPlayingView: View {
     }
 }
 
-private struct BackdropView: View {
+struct BackdropView: View {
     let store: ArtworkStore
     let row: TrackRow?
 

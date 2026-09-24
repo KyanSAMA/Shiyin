@@ -22,11 +22,14 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 布局：`scaledToFill` 的图片放 `.background` 并 `.clipped()`，作为 ZStack 子视图会按填充尺寸撑大父视图
 - Table 单元格等深层视图不用 `@Environment(AppModel.self)`（排序重建行时会查不到而崩溃），由表格层取出后显式传参（如 `CoverView(store:)`、`PlayingMark(player:)`）
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
+- 自建窗口（迷你播放器面板）里的 `NSHostingView` 不能直接当 `contentView`：即使 `sizingOptions = []`，它仍会在 `windowDidLayout` 里按内容理想尺寸（含标题栏安全区）改窗口大小；作为子视图加 autoresizing 即可
+- 按键：空格播放 / 暂停和「编辑文本时 ⌘ 方向键交给输入框」都在 `AppModel.handleKey`（本地按键监听，先于菜单快捷键）：无修饰键的菜单快捷键会吞掉搜索框里的空格，⌘←→ 菜单项会抢走光标移动
+- `Commands` 菜单只在打开时重读模型状态，且禁用的菜单项仍会吞掉自己的快捷键：带快捷键的菜单项不按动态状态禁用，由动作本身判断
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album） `filter`（`albumArtists`/`years`/`genres`/`formats` 数组、`hiRes`/`hasLyrics` 布尔，都缺省即清空）
-- 状态键：`app` `ui`（含 `filterChips`） `windows`（含 `scrolls` 滚动偏移） `library` `player`（含 `queue`、`gainDb`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf`
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album） `filter`（`albumArtists`/`years`/`genres`/`formats` 数组、`hiRes`/`hasLyrics` 布尔，都缺省即清空） `miniPlayer`（`value`，缺省 true） `focusSearch` `pressKey`（`key`: space/f/l/m/left/right/up/down，`modifiers`: command/shift/option，`repeat`；按前台 App 的路径走 `handleKey` → 窗口快捷键 → 菜单快捷键 → 窗口，因为 AppKit 不给非活动 App 匹配快捷键） `closeMainWindow` `openMainWindow`
+- 状态键：`app` `ui`（含 `filterChips`、`searchFocused`、`nowPlaying`） `windows`（含 `mini` 面板层级/空间/尺寸、`scrolls` 滚动偏移） `library` `player`（含 `queue`、`gainDb`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf`
 - 自测模式关闭全部动画（根视图 `.transaction`）：显示器睡眠时动画不推进，带动画的滚动 / 转场会停在第一帧
 - 路径占位：`@out`、`@fixtures`
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
@@ -37,6 +40,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 自测 App 为 `.accessory`，用户在用其他 App 时不会成为前台：禁止合成鼠标点击（会点进别的 App），交互验证只用 AX 动作（`AXSelected` / `AXPress`）；已验证 AX 选中侧栏行、按下播放条按钮都能驱动 UI。AppleScript 的 `entire contents` 遇到 Table 极慢且会挂起，故改用 Swift AX API
 - `activate` 是尽力而为：用户在用其他 App 时 macOS 拒绝激活（`app.isActive` 记录结果），截图通常是非活动窗口样式
 - `@NSApplicationDelegateAdaptor` 可用
+- 锁屏 / 显示器睡眠时 AX 树退化（窗口元素报成 AXApplication），`ax-press` 找不到面板里的元素：AX 走查要在屏幕解锁时做
 
 ## 播放引擎要点（第 4 步）
 - 播放器节点始终以输出采样率连接、自行变换文件采样率：采样率不同于输出的节点在新挂载时时间线错位，会静音约 1 秒；因此任何采样率之间都无缝，仅声道数变化时换新节点交接

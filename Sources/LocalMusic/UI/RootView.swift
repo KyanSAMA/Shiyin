@@ -4,6 +4,8 @@ import LocalMusicCore
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var ui = model.ui
@@ -18,6 +20,13 @@ struct RootView: View {
                     }
                 }
                 .searchable(text: $ui.search, placement: .toolbar, prompt: "搜索")
+                .searchFocused($searchFocused)
+                .onChange(of: ui.searchFocusRequests) {
+                    // Next turn: a window just reopened isn't ready yet, and focus it lost on closing may still read true.
+                    searchFocused = false
+                    Task { searchFocused = true }
+                }
+                .onChange(of: ui.nowPlayingShown) { if $1 { searchFocused = false } }
                 .toolbar(ui.nowPlayingShown ? .hidden : .visible, for: .windowToolbar)
                 .disabled(ui.nowPlayingShown)   // keep focus, type-select and VoiceOver out of the covered library
                 if ui.nowPlayingShown, let player = model.player {
@@ -39,6 +48,7 @@ struct RootView: View {
         .transaction { if !ui.animationsEnabled { $0.disablesAnimations = true; $0.animation = nil } }
         .task {
             model.ui.openSettings = openSettings
+            model.ui.openWindow = openWindow
             await model.startLibrary()
         }
     }
