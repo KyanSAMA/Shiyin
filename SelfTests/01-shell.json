@@ -1,0 +1,18 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "assert", "path": "app.storeOpen", "equals": true },
+    { "do": "appearance", "value": "dark" },
+    { "do": "snapshot", "name": "shell-dark" },
+    { "do": "assert", "path": "snapshots.shell-dark.isLikelyBlank", "equals": false },
+    { "do": "assert", "path": "snapshots.shell-dark.method", "equals": "screen" },
+    { "do": "sidebar", "value": "composers" },
+    { "do": "appearance", "value": "light" },
+    { "do": "activate" },
+    { "do": "snapshot", "name": "shell-light" },
+    { "do": "assert", "path": "snapshots.shell-light.isLikelyBlank", "equals": false },
+    { "do": "assert", "path": "ui.sidebar", "equals": "composers" },
+    { "do": "state", "name": "end" }
+  ]
+}
