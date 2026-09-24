@@ -4,6 +4,7 @@
   "steps": [
     { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
     { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "waitUntil", "path": "loudness.pending", "equals": 0, "timeout": 30 },
     { "do": "play", "title": "Part 1" },
     { "do": "waitUntil", "path": "player.isPlaying", "equals": true, "timeout": 5 },
     { "do": "assert", "path": "player.engineVolume", "equals": 0 },

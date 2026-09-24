@@ -5,9 +5,12 @@
 #              and a gapless pair (one 375 Hz tone split mid-buffer, 12 s = whole periods)
 #   library/Music/  a file the self-tests exclude;  library/junk/  non-audio files the scanner must ignore
 #   extra/     files copied in at runtime to exercise FSEvents
+#   loudness/  levels exact to ffmpeg's ebur128: Level Album (Loud −8 LUFS sine, Quiet −30 LUFS pink noise), Mid −20 LUFS,
+#              Mono −20 LUFS (dual mono), Peaky.wav (−30 LUFS noise with single-sample spikes to full scale),
+#              Step (the Gapless tone with part 2 6 dB down: track gains must switch exactly on the join)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=3
+VERSION=6
 OUT=.build/fixtures
 [ "$(cat "$OUT/.version" 2>/dev/null)" = "$VERSION" ] && exit 0
 rm -rf "$OUT"
@@ -82,5 +85,34 @@ ff -i "$OUT/cover-a.png" "$LIB/junk/cover.jpg"
 printf 'not audio' > "$LIB/junk/music_tag.db"
 
 audio "$OUT/extra/新歌.flac" 2 44100 "$FLAC16" - -metadata title=新歌 -metadata artist=YOASOBI
+
+# level <out> <LUFS> <mono|stereo> <lavfi source> [ffmpeg output args...]: measure once, then scale to the target
+level() {
+  local out=$1 target=$2 layout=$3 source=$4
+  shift 4
+  mkdir -p "$(dirname "$out")"
+  local measured
+  measured=$(ffmpeg -hide_banner -nostats -f lavfi -i "$source" -af "aformat=channel_layouts=$layout,ebur128=framelog=quiet:dualmono=true" \
+    -f null - 2>&1 | awk '/^ +I:/ { v = $2 } END { print v }')
+  ff -f lavfi -i "$source" -af "aformat=channel_layouts=$layout,volume=$(echo "$target - $measured" | bc -l)dB" "$@" "$out"
+}
+LN=$OUT/loudness
+level "$LN/Level Album/01 Loud.flac" -8 stereo "sine=frequency=1000:duration=8:sample_rate=48000" $FLAC24 \
+  -metadata title=Loud -metadata artist="Level Test" -metadata ALBUMARTIST="Level Test" -metadata album="Level Album" -metadata track=1
+level "$LN/Level Album/02 Quiet.flac" -30 stereo "anoisesrc=color=pink:duration=8:sample_rate=48000:seed=11" $FLAC24 \
+  -metadata title=Quiet -metadata artist="Level Test" -metadata ALBUMARTIST="Level Test" -metadata album="Level Album" -metadata track=2
+level "$LN/Mid.flac" -20 stereo "anoisesrc=color=pink:duration=8:sample_rate=48000:seed=12" $FLAC24 -metadata title=Mid -metadata artist="Level Test"
+level "$LN/Mono.flac" -20 mono "anoisesrc=color=pink:duration=8:sample_rate=48000:seed=14" $FLAC24 -metadata title=Mono -metadata artist="Level Test"
+level "$OUT/peaky-noise.wav" -30 stereo "anoisesrc=color=pink:duration=8:sample_rate=48000:seed=13" -c:a pcm_f32le
+ff -i "$OUT/peaky-noise.wav" -f lavfi -i "aevalsrc=exprs=if(eq(mod(n\,48000)\,24000)\,0.98\,0):s=48000:d=8:c=stereo" \
+  -filter_complex "[0][1]amix=inputs=2:normalize=0" -c:a pcm_s24le "$LN/Peaky.wav"
+rm "$OUT/peaky-noise.wav"
+for part in 1 2; do
+  trim=$([ $part = 1 ] && echo "atrim=end_sample=264601" || echo "atrim=start_sample=264601,volume=-6dB")
+  mkdir -p "$LN/Step"
+  ff -f lavfi -i "sine=frequency=375:sample_rate=48000:duration=12" -af "$trim" $FLAC24 \
+    -metadata title="Step $part" -metadata artist="Test Tone" -metadata ALBUMARTIST="Test Tone" -metadata album=Step \
+    -metadata track=$part/2 "$LN/Step/0$part Step $part.flac"
+done
 
 echo "$VERSION" > "$OUT/.version"

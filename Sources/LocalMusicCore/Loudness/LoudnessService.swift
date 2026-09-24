@@ -1,9 +1,15 @@
 import Foundation
 
-public struct LoudnessRecord: Sendable, Equatable {
-    public var integrated: Double?
-    public var samplePeak: Double
-    public var blockEnergies: [Float]
+struct LoudnessRecord: Sendable, Equatable {
+    var integrated: Double?
+    var samplePeak: Double
+    var blockEnergies: [Float]
+}
+
+struct LoudnessSummary: Sendable, Equatable {
+    let integrated: Double?
+    /// nil when the analysis failed.
+    let samplePeak: Double?
 }
 
 struct LoudnessJob: Sendable, Equatable {
@@ -13,7 +19,8 @@ struct LoudnessJob: Sendable, Equatable {
     let mtime: Double
 }
 
-/// Background analysis of the library: two workers at utility priority, prioritized ids first (current track, queue).
+/// Background analysis of the library and the gains derived from it: two workers at utility priority, prioritized ids
+/// first (current track, its album, the queue).
 public actor LoudnessService {
     public struct Progress: Sendable, Equatable {
         public var analyzed = 0
@@ -28,27 +35,39 @@ public actor LoudnessService {
         }
     }
 
-    public nonisolated let progress: AsyncStream<Progress>
-    private let continuation: AsyncStream<Progress>.Continuation
+    public struct Update: Sendable {
+        public var progress: Progress
+        public var gains: GainTable
+    }
+
+    public nonisolated let updates: AsyncStream<Update>
+    private let continuation: AsyncStream<Update>.Continuation
     private let store: LibraryStore
     private var queue: [LoudnessJob] = []
     private var priority: [Int64] = []
     private var inFlight: [Int64: LoudnessJob] = [:]
+    private var albums: [[Int64]] = []
+    /// By member ids, reused while every member's analysis is unchanged.
+    private var albumGains: [[Int64]: AlbumGain] = [:]
+    private var publishing = false
+    private var republish = false
     private static let workers = 2
     private static let decoder = DispatchQueue(label: "loudness", qos: .utility, attributes: .concurrent)
 
     public init(store: LibraryStore) {
         self.store = store
-        (progress, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
+        (updates, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(1))
     }
 
-    /// Re-reads what needs analysis (after a scan) and keeps the workers busy.
-    public func refresh() async {
+    /// Re-reads what needs analysis (after a scan) and keeps the workers busy. `albums`: the track ids of each album
+    /// that should get an album gain.
+    public func refresh(albums: [[Int64]]) async {
+        self.albums = albums
         let pending = (try? await store.loudnessPending()) ?? []
         queue = pending.filter { inFlight[$0.trackID] != $0 }
         reorder()
-        await publish()
         pump()
+        await publish()
     }
 
     public func prioritize(_ ids: [Int64]) {
@@ -80,12 +99,44 @@ public actor LoudnessService {
     private func finish(_ job: LoudnessJob, _ result: Result<LoudnessResult, Error>) async {
         try? await store.saveLoudness(job, result)
         inFlight[job.trackID] = nil
-        await publish()
         pump()
+        await publish()
     }
 
+    /// Serialized, so the last update reflects the latest analyses however the awaits interleave.
     private func publish() async {
-        guard let progress = try? await store.loudnessProgress() else { return }
-        continuation.yield(progress)
+        guard !publishing else { return republish = true }
+        publishing = true
+        repeat {
+            republish = false
+            guard let progress = try? await store.loudnessProgress(), let summaries = try? await store.loudnessSummaries() else { break }
+            var table = GainTable(tracks: summaries.compactMapValues { summary in
+                summary.samplePeak.map { GainTable.gain(integrated: summary.integrated, peak: $0) }
+            })
+            var gains: [[Int64]: AlbumGain] = [:]
+            // An album gets its gain once none of its tracks is pending; failed ones are left out.
+            for ids in albums {
+                let members = ids.compactMap { summaries[$0] }
+                guard members.count == ids.count, members.contains(where: { $0.samplePeak != nil }) else { continue }
+                if let cached = albumGains[ids], cached.members == members {
+                    gains[ids] = cached
+                    continue
+                }
+                let analyzed = zip(ids, members).compactMap { $1.samplePeak == nil ? nil : $0 }
+                guard let records = try? await store.loudness(for: analyzed), records.count == analyzed.count else { continue }
+                // Gated over the union of the album's blocks, so quiet interludes don't drag the album level down.
+                let integrated = LoudnessAnalyzer.integrated(analyzed.flatMap { records[$0]!.blockEnergies })
+                gains[ids] = AlbumGain(members: members, gainDb: GainTable.gain(integrated: integrated, peak: members.compactMap(\.samplePeak).max()!))
+            }
+            albumGains = gains
+            for (ids, album) in gains { for id in ids { table.albums[id] = album.gainDb } }
+            continuation.yield(Update(progress: progress, gains: table))
+        } while republish
+        publishing = false
+    }
+
+    private struct AlbumGain {
+        let members: [LoudnessSummary]
+        let gainDb: Double
     }
 }

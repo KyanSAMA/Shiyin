@@ -7,6 +7,9 @@ public struct AlbumGroup: Sendable, Identifiable, Hashable {
     public let year: Int?
     public let trackIDs: [Int64]
     public let coverTrackID: Int64?
+
+    /// Tracks without an album title, grouped per artist (see `albumKeys`).
+    public var isUntitled: Bool { id.hasPrefix("\u{1}") }
 }
 
 public struct PersonGroup: Sendable, Identifiable, Hashable {

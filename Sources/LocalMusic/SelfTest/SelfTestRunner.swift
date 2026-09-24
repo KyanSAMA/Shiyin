@@ -154,7 +154,13 @@ final class SelfTestRunner {
             engine.metering = false
             let r = engine.meter.reading
             measures[try step.required("name")] = ["seconds": r.seconds, "rmsDbfs": r.rmsDbfs, "peakDbfs": r.peakDbfs,
-                                                   "maxStep": r.maxStep, "longestGapMs": r.longestGapMs]
+                                                   "maxStep": r.maxStep, "longestGapMs": r.longestGapMs,
+                                                   "integratedLufs": r.integratedLufs as Any? ?? NSNull()]
+        case "setNormalization":
+            guard let mode = NormalizationMode(rawValue: try step.required("value")), let loudness = model.loudness else {
+                throw SelfTestFailure(description: "bad normalization mode or no loudness model")
+            }
+            loudness.setMode(mode)
         case "showNowPlaying":
             model.ui.nowPlayingShown = step["value"] as? Bool ?? true
             try await settle()
@@ -403,7 +409,7 @@ final class SelfTestRunner {
             "player": model.player.map(playerState) ?? NSNull(),
             "lyrics": model.player.map(lyricsState) ?? NSNull(),
             "loudness": model.loudness.map { ["analyzed": $0.progress.analyzed, "failed": $0.progress.failed, "total": $0.progress.total,
-                                                "pending": $0.progress.pending] as Step } ?? NSNull(),
+                                                "pending": $0.progress.pending, "mode": $0.mode.rawValue] as Step } ?? NSNull(),
             "measure": measures,
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
@@ -432,6 +438,7 @@ final class SelfTestRunner {
             "title": player.current?.title as Any? ?? NSNull(), "trackId": player.current?.id as Any? ?? NSNull(),
             "isPlaying": player.isPlaying, "position": player.position, "duration": player.duration,
             "fileSampleRate": engine.fileSampleRate, "outputSampleRate": engine.outputSampleRate,
+            "gainDb": engine.current?.gainDb as Any? ?? NSNull(),
             "volume": player.volume, "engineVolume": engine.volume, "lastError": player.lastError as Any? ?? NSNull(),
             "queue": ["count": player.queue.entries.count, "index": player.queue.index as Any? ?? NSNull(),
                       "upcomingTitles": player.queue.upcoming.prefix(5).compactMap { model.library?.index.tracks[$0.trackID]?.title },

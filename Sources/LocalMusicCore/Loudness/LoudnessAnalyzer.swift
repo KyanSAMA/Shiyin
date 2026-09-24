@@ -45,7 +45,7 @@ public struct LoudnessAnalyzer {
     }
 
     /// `channels[c][f]`, non-interleaved.
-    public mutating func process(_ channels: [UnsafeBufferPointer<Float>]) {
+    public mutating func process<Samples: RandomAccessCollection<Float>>(_ channels: [Samples]) {
         guard let count = channels.first?.count else { return }
         var weighted = [Double](repeating: 0, count: count)
         for (c, samples) in channels.enumerated() where weights[c] > 0 {
@@ -78,14 +78,16 @@ public struct LoudnessAnalyzer {
                        seconds: Double(frames) / sampleRate)
     }
 
-    /// Two-stage gating: absolute −70 LUFS, then relative −10 LU below the absolute-gated mean.
+    /// Two-stage gating: absolute −70 LUFS, then relative −10 LU below the absolute-gated mean (compared as energies).
     public static func integrated(_ energies: [Float]) -> Double? {
-        let absolute = energies.filter { loudness(Double($0)) > -70 }
+        let absolute = energies.filter { Double($0) > absoluteGate }
         guard !absolute.isEmpty else { return nil }
-        let threshold = loudness(mean(absolute)) - 10
-        let gated = absolute.filter { loudness(Double($0)) > threshold }
+        let threshold = mean(absolute) / 10
+        let gated = absolute.filter { Double($0) > threshold }
         return gated.isEmpty ? nil : loudness(mean(gated))
     }
+
+    private static let absoluteGate = pow(10, (-70 + 0.691) / 10)
 
     private static func loudness(_ energy: Double) -> Double { -0.691 + 10 * log10(energy) }
     private static func mean(_ values: [Float]) -> Double { values.reduce(0) { $0 + Double($1) } / Double(values.count) }
@@ -152,7 +154,7 @@ struct KWeighting {
 
     var coefficients: [Double] { [b.0, b.1, b.2, a.0, a.1, b.3, b.4, b.5, a.2, a.3] }
 
-    mutating func run(_ samples: UnsafeBufferPointer<Float>, _ output: (Int, Double) -> Void) {
+    mutating func run<Samples: RandomAccessCollection<Float>>(_ samples: Samples, _ output: (Int, Double) -> Void) {
         var (z0, z1, z2, z3) = z
         for (i, sample) in samples.enumerated() {
             let x = Double(sample)

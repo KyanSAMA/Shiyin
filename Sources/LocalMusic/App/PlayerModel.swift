@@ -21,6 +21,7 @@ import LocalMusicCore
 
     @ObservationIgnored let engine: PlaybackEngine
     @ObservationIgnored private let library: LibraryModel
+    @ObservationIgnored private weak var loudness: LoudnessModel?
     @ObservationIgnored private let muted: Bool
     @ObservationIgnored private var rng = SystemRandomNumberGenerator()
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -28,11 +29,10 @@ import LocalMusicCore
     @ObservationIgnored private var lyricsTrack: Int64?
     @ObservationIgnored private var prioritized: [Int64] = []
     @ObservationIgnored var onChange: (() -> Void)?
-    /// The current track, its album and the next queued tracks, so their loudness is analyzed first.
-    @ObservationIgnored var onPriorityChange: (([Int64]) -> Void)?
 
-    init(library: LibraryModel, muted: Bool) throws {
+    init(library: LibraryModel, loudness: LoudnessModel?, muted: Bool) throws {
         self.library = library
+        self.loudness = loudness
         self.muted = muted
         engine = try PlaybackEngine()
         engine.volume = muted ? 0 : volume
@@ -126,6 +126,10 @@ import LocalMusicCore
         sync()
     }
 
+    func gainsChanged() {
+        engine.updateGains { gainDb(for: $0.trackID) }
+    }
+
     func setVolume(_ value: Float) {
         volume = min(max(value, 0), 1)
         engine.volume = muted ? 0 : volume
@@ -159,7 +163,11 @@ import LocalMusicCore
     }
 
     private func item(_ entry: QueueEntry) -> PlaybackItem? {
-        library.index.tracks[entry.trackID].map { PlaybackItem(entryID: entry.id, trackID: $0.id, url: $0.url) }
+        library.index.tracks[entry.trackID].map { PlaybackItem(entryID: entry.id, trackID: $0.id, url: $0.url, gainDb: gainDb(for: $0.id)) }
+    }
+
+    private func gainDb(for track: Int64) -> Float {
+        loudness?.gainDb(for: track) ?? 0
     }
 
     /// Plays the current entry; an unplayable one is skipped, at most once per queue entry so an all-bad queue on
@@ -257,12 +265,13 @@ import LocalMusicCore
         }
     }
 
+    /// The current track, its album and the next queued tracks get their loudness analyzed first.
     private func prioritizeLoudness() {
         guard let current else { return }
         let ids = [current.id] + (library.index.album(containing: current.id)?.trackIDs ?? []) + queue.upcoming.prefix(20).map(\.trackID)
         guard ids != prioritized else { return }
         prioritized = ids
-        onPriorityChange?(ids)
+        loudness?.prioritize(ids)
     }
 
     private func updateLyricIndex() {

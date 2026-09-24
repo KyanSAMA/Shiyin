@@ -107,13 +107,13 @@ enum Route: Hashable {
         do {
             let store = try LibraryStore(url: paths.database)
             library = LibraryModel(store: store)
-            player = try PlayerModel(library: library!, muted: options.isSelfTest)
-            loudness = LoudnessModel(service: LoudnessService(store: store))
-            library?.onReload = { [weak player, weak loudness] in
+            loudness = LoudnessModel(store: store)
+            player = try PlayerModel(library: library!, loudness: loudness, muted: options.isSelfTest)
+            library?.onReload = { [weak library, weak player, weak loudness] in
                 player?.libraryReloaded()
-                loudness?.refresh()
+                if let library { loudness?.refresh(library.index) }
             }
-            player?.onPriorityChange = { [weak loudness] in loudness?.prioritize($0) }
+            loudness?.onGainsChange = { [weak player] in player?.gainsChanged() }
         } catch {
             startupError = String(describing: error)
         }

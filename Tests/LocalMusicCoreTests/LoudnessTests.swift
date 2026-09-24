@@ -110,6 +110,22 @@ struct LoudnessOracleTests {
     }
 }
 
+struct GainTableTests {
+    @Test func targetsReferenceLoudnessWithinPeakAndRange() {
+        #expect(abs(GainTable.gain(integrated: -23, peak: 0.5) - 5) < 1e-9)
+        #expect(abs(GainTable.gain(integrated: -30, peak: 0.98) - (-20 * log10(0.98) - 0.5)) < 1e-9)   // peak-limited
+        #expect(GainTable.gain(integrated: 10, peak: 1) == -24)
+        #expect(GainTable.gain(integrated: nil, peak: 0) == 0)
+    }
+
+    @Test func fallsBackToTheMedianTrackGainButNeverBoosts() {
+        #expect(GainTable(tracks: [1: -4, 2: -2, 3: 7]).gainDb(9, .album) == -2)
+        #expect(GainTable(tracks: [1: -4, 2: 2]).gainDb(9, .track) == -1)
+        #expect(GainTable(tracks: [1: 3, 2: 5]).gainDb(9, .track) == 0)   // the unknown peak might clip
+        #expect(GainTable().gainDb(9, .track) == 0)
+    }
+}
+
 extension FFmpeg {
     /// Integrated loudness from `ffmpeg -af ebur128` (the summary's `I:` line).
     static func integratedLoudness(_ url: URL) throws -> Double? {
@@ -138,13 +154,13 @@ struct LoudnessServiceTests {
         return url
     }
 
-    private func settle(_ service: LoudnessService) async throws -> LoudnessService.Progress {
-        var last = LoudnessService.Progress()
-        for await progress in service.progress {
-            last = progress
-            if progress.pending == 0 { break }
-        }
-        return last
+    private func settle(_ service: LoudnessService) async -> LoudnessService.Update? {
+        for await update in service.updates where update.progress.pending == 0 { return update }
+        return nil
+    }
+
+    private func scan(_ store: LibraryStore) async throws {
+        _ = try await LibraryScanner.scan(store: store, roots: LibraryRoots(include: [dir.path], exclude: []))
     }
 
     @Test func analyzesOnceAndReanalyzesOnlyChangedFiles() async throws {
@@ -153,11 +169,11 @@ struct LoudnessServiceTests {
         _ = try tone("quiet.flac", amplitude: 0.05)
         try Data("not audio".utf8).write(to: dir.appending(path: "broken.wav"))
         let store = try LibraryStore(url: dir.appending(path: ".db/library.sqlite"))
-        _ = try await LibraryScanner.scan(store: store, roots: LibraryRoots(include: [dir.path], exclude: []))
+        try await scan(store)
 
         let service = LoudnessService(store: store)
-        await service.refresh()
-        #expect(try await settle(service) == LoudnessService.Progress(analyzed: 2, total: 2))
+        await service.refresh(albums: [])
+        #expect(await settle(service)?.progress == LoudnessService.Progress(analyzed: 2, total: 2))
         let records = try await store.loudness(for: try await store.rows().map(\.id))
         let loudness = records.values.compactMap(\.integrated).sorted()
         #expect(loudness.count == 2 && abs(loudness[1] - loudness[0] - 20) < 0.1)   // 20 dB apart
@@ -165,7 +181,7 @@ struct LoudnessServiceTests {
 
         #expect(try await store.loudnessPending().isEmpty)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 5)], ofItemAtPath: loud.path)
-        _ = try await LibraryScanner.scan(store: store, roots: LibraryRoots(include: [dir.path], exclude: []))
+        try await scan(store)
         #expect(try await store.loudnessPending().map(\.url.lastPathComponent) == ["loud.flac"])
         #expect(try await store.loudness(for: try await store.rows().map(\.id)).count == 1)   // the stale result is dropped
     }
@@ -174,7 +190,7 @@ struct LoudnessServiceTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = try tone("a.flac", amplitude: 0.5)
         let store = try LibraryStore(url: dir.appending(path: ".db/library.sqlite"))
-        _ = try await LibraryScanner.scan(store: store, roots: LibraryRoots(include: [dir.path], exclude: []))
+        try await scan(store)
         let job = try #require(try await store.loudnessPending().first)
         try await store.saveLoudness(job, .failure(TagError.truncated))
         #expect(try await store.loudnessProgress() == LoudnessService.Progress(analyzed: 0, failed: 1, total: 1))
@@ -184,6 +200,39 @@ struct LoudnessServiceTests {
         let gone = LoudnessJob(trackID: 42, url: dir.appending(path: "gone.flac"), size: 1, mtime: 1)
         try await store.saveLoudness(gone, .failure(TagError.truncated))   // no such track: ignored, no FK error
         #expect(try await store.loudness(for: [42]).isEmpty)
+    }
+
+    /// ffmpeg's sine peaks at 1/8 and its stereo upmix takes 3 dB off each channel: ×0.5 is −27.09 LUFS, ×0.05 −47.09.
+    @Test func derivesTrackAndAlbumGains() async throws {
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try tone("a.flac", amplitude: 0.5)
+        let quiet = try tone("b.flac", amplitude: 0.05)
+        _ = try tone("c.flac", amplitude: 0.5)
+        let store = try LibraryStore(url: dir.appending(path: ".db/library.sqlite"))
+        try await scan(store)
+        let ids = try await store.rows().sorted { $0.path < $1.path }.map(\.id)
+        let broken = try #require(try await store.loudnessPending().first { $0.trackID == ids[2] })
+        try await store.saveLoudness(broken, .failure(TagError.truncated))
+        let service = LoudnessService(store: store)
+        await service.refresh(albums: [ids])
+        let gains = try #require(await settle(service)?.gains)
+
+        #expect(abs(gains.gainDb(ids[0], .track) - 9.09) < 0.05)
+        #expect(gains.gainDb(ids[1], .track) == 12)   // +29 dB clamped
+        // The quiet track's blocks fall below the album's relative gate, so the album plays at the loud track's level;
+        // the undecodable track doesn't hold the album gain back.
+        #expect(ids.allSatisfy { abs(gains.gainDb($0, .album) - 9.09) < 0.05 })
+        #expect(gains.gainDb(ids[0], .off) == 0)
+
+        // Re-analysis replaces the cached album gain: −27.09 and −21.07 LUFS tracks pool to −23.11.
+        _ = try tone("b.flac", amplitude: 1)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 5)], ofItemAtPath: quiet.path)
+        try await scan(store)
+        await service.refresh(albums: [ids])
+        #expect(abs((await settle(service)?.gains.gainDb(ids[1], .album) ?? 0) - 5.11) < 0.05)
+
+        await service.refresh(albums: [])
+        #expect(abs((await settle(service)?.gains.gainDb(ids[1], .album) ?? 0) - 3.07) < 0.05)   // no album: its track gain
     }
 
     @Test func upgradesAVersion1Database() throws {

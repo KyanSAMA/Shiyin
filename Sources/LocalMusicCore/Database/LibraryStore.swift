@@ -149,18 +149,30 @@ public actor LibraryStore {
                   Date().timeIntervalSince1970, error, job.trackID])
     }
 
-    /// Successful analyses of the tracks' current files only.
-    public func loudness(for ids: [Int64]) throws -> [Int64: LoudnessRecord] {
+    /// Analyses of the tracks' current files.
+    private static let currentLoudness = """
+        FROM loudness l JOIN track t ON t.id = l.track_id AND t.file_size = l.file_size AND t.file_mtime = l.file_mtime
+        WHERE l.analyzer_version = ?
+        """
+
+    func loudness(for ids: [Int64]) throws -> [Int64: LoudnessRecord] {
         guard !ids.isEmpty else { return [:] }
         let rows = try db.query("""
-            SELECT l.track_id, l.integrated_lufs, l.sample_peak, l.block_energies FROM loudness l
-            JOIN track t ON t.id = l.track_id AND t.file_size = l.file_size AND t.file_mtime = l.file_mtime
-            WHERE l.error IS NULL AND l.analyzer_version = ? AND l.track_id IN (\(ids.map(String.init).joined(separator: ",")))
+            SELECT l.track_id, l.integrated_lufs, l.sample_peak, l.block_energies \(Self.currentLoudness)
+              AND l.error IS NULL AND l.track_id IN (\(ids.map(String.init).joined(separator: ",")))
             """, [LoudnessAnalyzer.version]) { r in
             (r.int64(0)!, LoudnessRecord(integrated: r.double(1), samplePeak: r.double(2)!,
                                          blockEnergies: r.data(3).map { data in data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) } } ?? []))
         }
         return Dictionary(uniqueKeysWithValues: rows)
+    }
+
+    /// Every current analysis without the block energies; a failed one has no peak.
+    func loudnessSummaries() throws -> [Int64: LoudnessSummary] {
+        Dictionary(uniqueKeysWithValues: try db.query("SELECT l.track_id, l.integrated_lufs, l.sample_peak \(Self.currentLoudness)",
+                                                      [LoudnessAnalyzer.version]) {
+            ($0.int64(0)!, LoudnessSummary(integrated: $0.double(1), samplePeak: $0.double(2)))
+        })
     }
 
     func loudnessProgress() throws -> LoudnessService.Progress {

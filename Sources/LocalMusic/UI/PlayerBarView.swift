@@ -17,6 +17,7 @@ struct PlayerBarView: View {
                 .frame(maxWidth: 520)
                 Spacer(minLength: 0)
                 PageToggles(ui: model.ui, hasTrack: player.current != nil)
+                if let loudness = model.loudness { NormalizationMenu(loudness: loudness) }
                 VolumeControl(player: player)
                     .frame(width: 130)
             }
@@ -121,6 +122,45 @@ private struct ProgressRow: View {
         }
         .font(.system(size: 10).monospacedDigit())
         .foregroundStyle(.secondary)
+    }
+}
+
+private struct NormalizationMenu: View {
+    let loudness: LoudnessModel
+
+    var body: some View {
+        Menu {
+            NormalizationPicker(loudness: loudness).pickerStyle(.inline)
+        } label: {
+            Label("响度均衡", systemImage: "waveform").labelStyle(.iconOnly)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .foregroundStyle(loudness.mode == .off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+        .help("响度均衡：\(loudness.mode.title)")
+    }
+}
+
+struct NormalizationPicker: View {
+    let loudness: LoudnessModel
+    var title = "响度均衡"
+
+    var body: some View {
+        Picker(title, selection: Binding(get: { loudness.mode }, set: { loudness.setMode($0) })) {
+            ForEach(NormalizationMode.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+    }
+}
+
+extension NormalizationMode {
+    var title: String {
+        switch self {
+        case .off: "关"
+        case .track: "单曲"
+        case .album: "专辑"
+        }
     }
 }
 

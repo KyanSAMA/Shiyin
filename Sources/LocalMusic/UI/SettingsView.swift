@@ -33,11 +33,20 @@ private struct LibrarySettingsView: View {
                         .disabled(library.scanning)
                 }
             }
-            if let progress = loudness?.progress, progress.total > 0 {
-                Section("响度分析") {
-                    LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
-                    if progress.failed > 0 { LabeledContent("无法分析", value: "\(progress.failed) 首") }
-                    if progress.pending > 0 { ProgressView(value: Double(progress.total - progress.pending), total: Double(progress.total)) }
+            if let loudness {
+                Section {
+                    NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented)
+                    let progress = loudness.progress
+                    if progress.total > 0 {
+                        LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
+                        if progress.failed > 0 { LabeledContent("无法分析", value: "\(progress.failed) 首") }
+                        if progress.pending > 0 { ProgressView(value: Double(progress.total - progress.pending), total: Double(progress.total)) }
+                    }
+                } header: {
+                    Text("响度均衡")
+                } footer: {
+                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益。")
+                        .foregroundStyle(.secondary)
                 }
             }
         }

@@ -25,8 +25,8 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/跳变/空白） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`）
-- 状态键：`app` `ui` `windows`（含 `scrolls` 滚动偏移） `library` `player`（含 `queue`） `lyrics` `loudness`（analyzed/failed/total/pending） `measure` `nowPlayingInfo` `snapshots` `perf`
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album）
+- 状态键：`app` `ui` `windows`（含 `scrolls` 滚动偏移） `library` `player`（含 `queue`、`gainDb`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf`
 - 自测模式关闭全部动画（根视图 `.transaction`）：显示器睡眠时动画不推进，带动画的滚动 / 转场会停在第一帧
 - 路径占位：`@out`、`@fixtures`
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
@@ -42,4 +42,6 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 播放器节点始终以输出采样率连接、自行变换文件采样率：采样率不同于输出的节点在新挂载时时间线错位，会静音约 1 秒；因此任何采样率之间都无缝，仅声道数变化时换新节点交接
 - `playerTime(forNodeTime:)` 对无效的 `lastRenderTime` 会抛 ObjC 异常（无法捕获）：调用前必须检查 `isSampleTimeValid`
 - 无 SEEKTABLE 的大 FLAC 首次定位需约 0.5 s（Core Audio 扫描建索引，按文件对象缓存）：同一曲目内定位复用 `AVAudioFile`
-- macOS 27 起用 `connectNode(_:to:format:)`、`playAudio()`、`installAudioTap`（`AVReadOnlyAudioPCMBuffer`，Sendable）
+- macOS 27 起用 `connectNode(_:to:format:)`、`playAudio()`、`installAudioTap`（`AVReadOnlyAudioPCMBuffer`，Sendable）、`withAUAudioUnit`
+- 增益用进程内自注册的 `GainUnit`（AUAudioUnit 子类）：系统效果器（如 AUNBandEQ）的 `scheduleParameterBlock` 只按渲染周期生效（实测落在周期起点），且排好的事件无法撤销。无缝衔接处的增益切换按渲染采样时间精确到帧；暂停会改变播放器时间与渲染时间的映射，所以暂停时撤销（按渲染已到达的一侧取增益）、播放中每个 tick 重新校准
+- 单声道经 channelMixer 上混到两侧各 −3 dB；引擎给单声道段补 +3.01 dB，按双单声道播放（与响度测量一致）

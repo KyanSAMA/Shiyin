@@ -131,6 +131,8 @@ private final class OfflineRig {
     let dir = FileManager.default.temporaryDirectory.appending(path: "lm-play-\(UUID().uuidString)")
     let engine: PlaybackEngine
     let meter = OutputMeter()
+    /// Every rendered frame of the left channel.
+    var captured: [Float] = []
     var events: [PlaybackEngine.Event] = []
     var upcoming: [PlaybackItem] = []
     private var entry = 0
@@ -147,19 +149,23 @@ private final class OfflineRig {
 
     deinit { try? FileManager.default.removeItem(at: dir) }
 
-    func item(_ name: String, rate: Double = 48000, channels: Int = 2, frames: Range<Int>, sample: (Int) -> Float) throws -> PlaybackItem {
+    func item(_ name: String, rate: Double = 48000, channels: Int = 2, gainDb: Float = 0, frames: Range<Int>,
+              sample: (Int) -> Float) throws -> PlaybackItem {
         let url = dir.appending(path: "\(name).caf")
         try ToneFile.write(url, rate: rate, channels: channels, frames: frames, sample: sample)
         entry += 1
-        return PlaybackItem(entryID: entry, trackID: Int64(entry), url: url)
+        return PlaybackItem(entryID: entry, trackID: Int64(entry), url: url, gainDb: gainDb)
     }
 
     /// Renders in small chunks, ticking and yielding so completion callbacks reach the main actor between chunks.
-    func render(seconds: Double, chunk: AVAudioFrameCount = 256) async throws {
+    /// Without ticks, the render runs ahead of what the engine has observed, as the device's output latency does.
+    func render(seconds: Double, chunk: AVAudioFrameCount = 256, tick: Bool = true) async throws {
         var remaining = Int(seconds * 48000)
         while remaining > 0 {
-            meter.process(try engine.render(frames: chunk))
-            engine.tick()
+            let buffer = try engine.render(frames: chunk)
+            meter.process(buffer)
+            captured += UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength))
+            if tick { engine.tick() }
             remaining -= Int(chunk)
             await Task.yield()
         }
@@ -245,13 +251,14 @@ struct PlaybackEngineTests {
         #expect(rig.events.isEmpty && rig.engine.current == nil)
     }
 
-    @Test func playsMonoOnBothChannels() async throws {
+    /// As dual mono: both speakers at the file's level, which is how its loudness is measured.
+    @Test func playsMonoOnBothChannelsAtFullLevel() async throws {
         let rig = try OfflineRig()
         let mono = try rig.item("mono", channels: 1, frames: 0..<48000) { ToneFile.sine($0) }
         try rig.engine.play(mono)
         try await rig.render(seconds: 0.5)
         let channels = rig.meter.reading.channelRmsDbfs
-        #expect(channels.count == 2 && channels.allSatisfy { $0 > -20 } && abs(channels[0] - channels[1]) < 0.1)
+        #expect(channels.count == 2 && channels.allSatisfy { abs($0 - -9.03) < 0.05 })   // a 0.5 sine's RMS
     }
 
     @Test func downmixesSurroundFiles() async throws {
@@ -296,6 +303,80 @@ struct PlaybackEngineTests {
         try rig.engine.resume()
         try await rig.render(seconds: 0.5)
         #expect(rig.events.count == 2 && abs(rig.engine.position - 0.25) < 0.01)
+    }
+
+    /// Constant-valued files make the applied gain readable frame by frame: 0.5 at −12.04 dB is 0.125, at −6.02 dB 0.25.
+    @Test func switchesGainOnTheFirstFrameOfTheNextTrack() async throws {
+        let rig = try OfflineRig()
+        let split = 30_001
+        let first = try rig.item("a", gainDb: -12.0412, frames: 0..<split) { _ in 0.5 }
+        rig.upcoming = [try rig.item("b", gainDb: -6.0206, frames: 0..<24000) { _ in 0.5 }]
+        try rig.engine.play(first)
+        try await rig.render(seconds: 1.2)
+        let start = try #require(rig.captured.firstIndex { $0 != 0 })
+        let switched = try #require(rig.captured.firstIndex { abs($0 - 0.25) < 1e-4 })
+        #expect(abs(rig.captured[start] - 0.125) < 1e-4)   // the first track starts at its own gain, no ramp
+        #expect(switched - start == split)
+        #expect(rig.captured[start..<switched].allSatisfy { abs($0 - 0.125) < 1e-4 })
+    }
+
+    @Test func keepsTheGainSwitchOnTheJoinAcrossAPause() async throws {
+        let rig = try OfflineRig()
+        let first = try rig.item("a", frames: 0..<24000) { _ in 0.5 }
+        rig.upcoming = [try rig.item("b", gainDb: -6.0206, frames: 0..<24000) { _ in 0.5 }]
+        try rig.engine.play(first)
+        try await rig.render(seconds: 0.25)
+        rig.engine.pause()
+        try await rig.render(seconds: 0.3)
+        try rig.engine.resume()
+        try await rig.render(seconds: 1)
+        let sounding = rig.captured.filter { $0 != 0 }   // drops the paused stretch
+        #expect(sounding.firstIndex { abs($0 - 0.25) < 1e-4 } == 24000)
+        #expect(sounding.prefix(24000).allSatisfy { abs($0 - 0.5) < 1e-4 })
+    }
+
+    /// Pausing, or re-evaluating gains, after the render crossed the join but before a tick noticed must keep the next
+    /// track's gain.
+    @Test func keepsTheNextGainWhenInterruptedJustPastTheJoin() async throws {
+        for interruption in ["pause", "gains"] {
+            let rig = try OfflineRig()
+            let first = try rig.item("a", frames: 0..<24000) { _ in 0.5 }
+            rig.upcoming = [try rig.item("b", gainDb: -6.0206, frames: 0..<24000) { _ in 0.5 }]
+            try rig.engine.play(first)
+            try await rig.render(seconds: 0.4)
+            try await rig.render(seconds: 0.15, tick: false)
+            if interruption == "pause" {
+                rig.engine.pause()
+                try await rig.render(seconds: 0.2)
+                try rig.engine.resume()
+            } else {
+                rig.engine.updateGains { $0.entryID == first.entryID ? -1 : -6.0206 }
+            }
+            try await rig.render(seconds: 0.4)
+            let sounding = rig.captured.filter { $0 != 0 }
+            #expect(sounding[24000...].allSatisfy { abs($0 - 0.25) < 1e-4 }, "\(interruption)")
+        }
+    }
+
+    @Test func rampsALiveGainChange() async throws {
+        let rig = try OfflineRig()
+        try rig.engine.play(try rig.item("dc", frames: 0..<48000) { _ in 0.5 })
+        try await rig.render(seconds: 0.2)
+        rig.engine.updateGains { _ in -6.0206 }
+        try await rig.render(seconds: 0.3)
+        let start = try #require(rig.captured.firstIndex { $0 != 0 })
+        let steps = zip(rig.captured[start...], rig.captured[(start + 1)...]).map { abs($1 - $0) }
+        #expect(steps.max()! < 0.005)   // no click
+        #expect(rig.captured.suffix(100).allSatisfy { abs($0 - 0.25) < 1e-4 } && rig.engine.current?.gainDb == -6.0206)
+    }
+
+    @Test func measuresOutputLoudness() async throws {
+        let rig = try OfflineRig()
+        try rig.engine.play(try rig.item("tone", gainDb: -6, frames: 0..<96000) { ToneFile.sine($0) })
+        try await rig.render(seconds: 1.5)
+        // A 375 Hz sine peaking at 0.5 on both channels measures −6.74 LUFS (ffmpeg agrees), −12.74 after the gain.
+        let loudness = try #require(rig.meter.reading.integratedLufs)
+        #expect(abs(loudness - -12.74) < 0.05, "\(loudness)")
     }
 
     @Test func pausesAndResumesInPlace() async throws {

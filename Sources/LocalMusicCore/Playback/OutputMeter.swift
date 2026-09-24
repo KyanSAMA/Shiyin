@@ -1,7 +1,7 @@
 import AVFAudio
 import Synchronization
 
-/// Measures rendered audio (engine tap or offline buffers): level, continuity and gaps. Thread-safe.
+/// Measures rendered audio (engine tap or offline buffers): level, loudness, continuity and gaps. Thread-safe.
 public final class OutputMeter: Sendable {
     public struct Reading: Sendable, Equatable {
         public var seconds = 0.0
@@ -12,6 +12,8 @@ public final class OutputMeter: Sendable {
         /// Longest run of digital silence between two sounding frames (leading/trailing silence ignored).
         public var longestGapMs = 0.0
         public var channelRmsDbfs: [Double] = []
+        /// BS.1770 integrated loudness; nil for silence or less than one 400 ms block.
+        public var integratedLufs: Double?
     }
 
     private struct State {
@@ -24,6 +26,7 @@ public final class OutputMeter: Sendable {
         var sounded = false
         var zeroRun = 0
         var longestGap = 0
+        var loudness: LoudnessAnalyzer?
     }
 
     private let state = Mutex(State())
@@ -39,11 +42,17 @@ public final class OutputMeter: Sendable {
     public func process(_ buffer: AVReadOnlyAudioPCMBuffer) {
         let channels = Int(buffer.format.channelCount), frames = buffer.frameLength
         var sounding = [Bool](repeating: false, count: frames)
+        let samples = (0..<channels).map { c -> [Float] in
+            guard case .float(let span) = buffer.channelData(c) else { return [] }
+            return span.withUnsafeBufferPointer(Array.init)
+        }
         state.withLock { s in
             if s.sumSquares.count != channels {
                 s.sumSquares = Array(repeating: 0, count: channels)
                 s.last = Array(repeating: .nan, count: channels)
+                s.loudness = LoudnessAnalyzer(sampleRate: buffer.format.sampleRate, channels: channels)
             }
+            s.loudness?.process(samples)
             s.rate = buffer.format.sampleRate
             for c in 0..<channels {
                 guard case .float(let samples) = buffer.channelData(c) else { continue }
@@ -81,7 +90,7 @@ public final class OutputMeter: Sendable {
                            rmsDbfs: dbfs(channelPower.reduce(0, +) / Double(max(channelPower.count, 1))),
                            peakDbfs: dbfs(Double(s.peak * s.peak)), maxStep: Double(s.maxStep),
                            longestGapMs: s.rate > 0 ? Double(s.longestGap) / s.rate * 1000 : 0,
-                           channelRmsDbfs: channelPower.map(dbfs))
+                           channelRmsDbfs: channelPower.map(dbfs), integratedLufs: s.loudness?.result.integrated)
         }
     }
 

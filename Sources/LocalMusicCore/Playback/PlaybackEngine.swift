@@ -24,7 +24,7 @@ public enum PlaybackError: Error {
 
 /// Gapless file player.
 ///
-/// Graph: player ─(output rate, file channels)→ channelMixer ─(stereo)→ eq (gain) → mainMixer → output.
+/// Graph: player ─(output rate, file channels)→ channelMixer ─(stereo)→ gain → mainMixer → output.
 /// The player runs at the output rate and sample-rate converts each file itself, so files of any rate queue back to back
 /// on one player timeline (gapless). Only a channel-count change needs a fresh player node, handed off once the previous
 /// file has rendered. (A node whose rate differs from the output starts with a skewed timeline and stays silent for
@@ -49,7 +49,7 @@ public final class PlaybackEngine {
     public private(set) var position: Double = 0
     public private(set) var duration: Double = 0
     public private(set) var fileSampleRate: Double = 0
-    public var outputSampleRate: Double { eq.outputFormat(forBus: 0).sampleRate }
+    public var outputSampleRate: Double { gainNode.outputFormat(forBus: 0).sampleRate }
     public var volume: Float {
         get { engine.mainMixerNode.outputVolume }
         set { engine.mainMixerNode.outputVolume = newValue }
@@ -59,8 +59,8 @@ public final class PlaybackEngine {
     public var metering = false {
         didSet {
             guard metering != oldValue else { return }
-            eq.removeTap(onBus: 0)
-            if metering { try? eq.installAudioTap(onBus: 0, bufferSize: 2048, format: nil, tapProvider: OutputMeter.tap(meter)) }
+            gainNode.removeTap(onBus: 0)
+            if metering { try? gainNode.installAudioTap(onBus: 0, bufferSize: 2048, format: nil, tapProvider: OutputMeter.tap(meter)) }
         }
     }
 
@@ -72,7 +72,7 @@ public final class PlaybackEngine {
 
     private struct Segment {
         let id: Int
-        let item: PlaybackItem
+        var item: PlaybackItem
         let file: AVAudioFile
         let startFrame: AVAudioFramePosition
         let frames: AVAudioFrameCount
@@ -87,7 +87,10 @@ public final class PlaybackEngine {
     private let engine = AVAudioEngine()
     private var player = AVAudioPlayerNode()
     private let channelMixer = AVAudioMixerNode()
-    private let eq = AVAudioUnitEQ(numberOfBands: 0)
+    private let gainNode: AVAudioUnitEffect
+    private let gain: GainUnit
+    /// The next segment and render sample its gain switch is armed for.
+    private var armed: (segment: Int, at: AVAudioFramePosition)?
     private let isOffline: Bool
     private var playerFormat: AVAudioFormat?
     private var outputRate = 48000.0
@@ -103,7 +106,10 @@ public final class PlaybackEngine {
     private var reachedEnd = false
 
     public init(mode: Mode = .device) throws {
-        [player, channelMixer, eq].forEach(engine.attach)
+        GainUnit.registered
+        gainNode = AVAudioUnitEffect(audioComponentDescription: GainUnit.component)
+        gain = gainNode.withAUAudioUnit { $0 as! GainUnit }
+        [player, channelMixer, gainNode].forEach(engine.attach)
         if case .offline(let rate) = mode {
             isOffline = true
             try engine.enableManualRenderingMode(.offline, format: AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!,
@@ -138,7 +144,7 @@ public final class PlaybackEngine {
             playerFormat = format
         }
         let segment = schedule(item, file, from: time, playerStart: 0)
-        enter(segment)
+        enter(segment, snap: true)
         position = Double(segment.startFrame) / segment.rate
         if autoplay { try resume() } else { isPlaying = false }
     }
@@ -156,6 +162,7 @@ public final class PlaybackEngine {
         player.pause()
         if !isOffline { engine.pause() }   // release the audio hardware while paused
         isPlaying = false
+        disarm()   // resuming shifts the player timeline against render time
     }
 
     public func stop() {
@@ -189,6 +196,21 @@ public final class PlaybackEngine {
         lookaheadDone = false
     }
 
+    /// Re-evaluates the queued items' gains (mode changed, analyses arrived); a changed current one ramps to its level.
+    public func updateGains(_ gainDb: (PlaybackItem) -> Float) {
+        var changed = false
+        func update(_ item: inout PlaybackItem) {
+            let new = gainDb(item)
+            if new != item.gainDb { (item.gainDb, changed) = (new, true) }
+        }
+        for i in segments.indices { update(&segments[i].item) }
+        if current != nil { update(&current!) }
+        if handoff != nil { update(&handoff!) }
+        guard changed else { return }
+        disarm()
+        armGain()
+    }
+
     /// Advances position and item boundaries; call periodically (the app runs it at 20 Hz while playing).
     public func tick() {
         guard let currentSegment, !segments.isEmpty else { return }
@@ -201,7 +223,7 @@ public final class PlaybackEngine {
             let switched = segment.id != currentSegment
             if switched {
                 segments.removeAll { $0.id < segment.id }
-                enter(segment)
+                enter(segment, snap: false)
             }
             position = min(Double(segment.startFrame) / segment.rate + max(now - segment.playerStart, 0), duration)
             if switched { onEvent?(.advanced(segment.item)) }
@@ -209,6 +231,7 @@ public final class PlaybackEngine {
             if let last = segments.last, rendered >= last.playerEnd {
                 return finished(generation: generation, segment: last.id)
             }
+            armGain()
         }
         lookAhead()
     }
@@ -228,8 +251,8 @@ public final class PlaybackEngine {
         outputRate = rate > 0 ? rate : 48000
         playerFormat = nil   // the player must follow the new output rate
         let format = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 2)!
-        try engine.connectNode(channelMixer, to: eq, format: format)
-        try engine.connectNode(eq, to: engine.mainMixerNode, format: format)
+        try engine.connectNode(channelMixer, to: gainNode, format: format)
+        try engine.connectNode(gainNode, to: engine.mainMixerNode, format: format)
     }
 
     private func fits(_ file: AVAudioFile) -> Bool {
@@ -259,13 +282,42 @@ public final class PlaybackEngine {
         return segment
     }
 
-    private func enter(_ segment: Segment) {
+    /// `snap` when the player was stopped; otherwise the gain was either switched on the joining frame already or, if
+    /// that couldn't be armed in time, ramps now.
+    private func enter(_ segment: Segment, snap: Bool) {
         currentSegment = segment.id
         current = segment.item
         duration = segment.duration
         fileSampleRate = segment.rate
         lookaheadDone = false
-        eq.globalGain = segment.item.gainDb
+        gain.set(Self.level(segment), snap: snap)
+        armed = nil
+    }
+
+    /// The item's gain, plus 3 dB for mono: the channel mixer spreads it over both speakers at −3 dB each, whereas its
+    /// loudness is measured (and other players play it) as dual mono.
+    private static func level(_ segment: Segment) -> Float {
+        segment.item.gainDb + (segment.file.processingFormat.channelCount == 1 ? 3.0103 : 0)
+    }
+
+    /// Drops the armed switch, keeping whichever side of the join the render (ahead of what's heard) has reached.
+    private func disarm() {
+        guard let segment = segments.first(where: { $0.id == currentSegment }) else { return }
+        gain.disarm(Self.level(segment), next: segments.last.flatMap { $0.id == segment.id ? nil : Self.level($0) }, snap: !isPlaying)
+        armed = nil
+    }
+
+    /// Pins the next segment's gain to its first frame in render time. Re-checked every tick while the player renders, as
+    /// pausing shifts the player timeline against render time; left alone once the render has passed the join.
+    private func armGain() {
+        guard isPlaying, let next = segments.last, next.id != currentSegment,
+              let render = player.lastRenderTime, render.isSampleTimeValid,
+              let played = player.playerTime(forNodeTime: render), Double(played.sampleTime) / played.sampleRate < next.playerStart,
+              let at = player.nodeTime(forPlayerTime: AVAudioTime(sampleTime: AVAudioFramePosition((next.playerStart * outputRate).rounded()),
+                                                                  atRate: outputRate)),
+              at.isSampleTimeValid, armed?.segment != next.id || armed?.at != at.sampleTime else { return }
+        armed = (next.id, at.sampleTime)
+        gain.arm(at: Float64(at.sampleTime), Self.level(next))
     }
 
     private func lookAhead() {
