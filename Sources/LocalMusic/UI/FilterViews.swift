@@ -21,6 +21,7 @@ struct FilterMenu: View {
             Label("筛选", systemImage: ui.filter.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
         }
         .help("筛选")
+        .disabled(!ui.path.isEmpty)   // it filters the list pages only
     }
 
     private func values<Value: Hashable>(_ title: String, _ options: [Value], _ key: WritableKeyPath<TrackFilter, Set<Value>>,

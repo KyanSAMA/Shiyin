@@ -29,6 +29,8 @@ struct SongsTable: View {
                 .width(86)
         }
         .trackActions(rows)
+        // Rebuilt on re-sort: diffing the reordered rows animates every move and re-measures each row (1.4 s for 322).
+        .id(ui.songSort)
     }
 }
 

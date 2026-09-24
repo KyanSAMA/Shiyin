@@ -28,6 +28,12 @@ struct RootView: View {
                 }
                 .onChange(of: ui.nowPlayingShown) { if $1 { searchFocused = false } }
                 .toolbar(ui.nowPlayingShown ? .hidden : .visible, for: .windowToolbar)
+                // Here rather than on the list pages: adding and removing a toolbar item on every push / pop costs ~100 ms.
+                .toolbar {
+                    if let index = model.library?.index, !index.songs.isEmpty {
+                        FilterMenu(ui: ui, facets: index.facets)
+                    }
+                }
                 .disabled(ui.nowPlayingShown)   // keep focus, type-select and VoiceOver out of the covered library
                 if ui.nowPlayingShown, let player = model.player {
                     NowPlayingView(player: player)
@@ -37,7 +43,8 @@ struct RootView: View {
             }
             .animation(.easeInOut(duration: 0.3), value: ui.nowPlayingShown)
             .inspector(isPresented: $ui.queueShown) {
-                if let player = model.player {
+                // A hidden inspector keeps its content: a live queue list would lay out every entry of a new queue.
+                if ui.queueShown, let player = model.player {
                     QueueView(player: player).inspectorColumnWidth(min: 240, ideal: 300, max: 420)
                 }
             }
@@ -98,10 +105,9 @@ struct DetailView: View {
                     Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index) }
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
-                    Results(ui: ui, isEmpty: groups.isEmpty) { PeopleList(groups: groups, role: role).id(ui.listID) }
+                    Results(ui: ui, isEmpty: groups.isEmpty) { PeopleList(groups: groups, role: role).id(ui.listID + [role]) }
                 }
             }
-            .toolbar { FilterMenu(ui: ui, facets: index.facets) }
         } else if let library = model.library, library.scanning || !library.started {
             ProgressView("正在扫描曲库…")
         } else {
