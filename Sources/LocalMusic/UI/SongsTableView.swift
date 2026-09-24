@@ -208,7 +208,10 @@ private final class TrackTable: NSTableView {
     var onReturn: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.keyCode == 76 { onReturn?() } else { super.keyDown(with: event) }
+        guard event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else {
+            return super.keyDown(with: event)
+        }
+        if !event.isARepeat { onReturn?() }
     }
 }
 
