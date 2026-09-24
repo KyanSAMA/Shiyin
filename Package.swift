@@ -11,6 +11,7 @@ let package = Package(
             dependencies: ["LocalMusicCore"],
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
+        .executableTarget(name: "lmtool", dependencies: ["LocalMusicCore"]),
         .testTarget(
             name: "LocalMusicCoreTests",
             dependencies: ["LocalMusicCore"],
