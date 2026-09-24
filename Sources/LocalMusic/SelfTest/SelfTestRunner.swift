@@ -258,16 +258,10 @@ final class SelfTestRunner {
     }
 
     private func comparator(_ column: String, ascending: Bool) throws -> KeyPathComparator<TrackRow> {
-        let order: SortOrder = ascending ? .forward : .reverse
-        switch column {
-        case "title": return KeyPathComparator(\.title, comparator: .localizedStandard, order: order)
-        case "artist": return KeyPathComparator(\.artistText, comparator: .localizedStandard, order: order)
-        case "album": return KeyPathComparator(\.albumTitle, comparator: .localizedStandard, order: order)
-        case "year": return KeyPathComparator(\.yearSortKey, order: order)
-        case "duration": return KeyPathComparator(\.duration, order: order)
-        case "added": return KeyPathComparator(\.addedAt, order: order)
-        default: throw SelfTestFailure(description: "unknown column \(column)")
+        guard let comparator = SongColumn(rawValue: column)?.comparator(ascending ? .forward : .reverse) else {
+            throw SelfTestFailure(description: "unknown column \(column)")
         }
+        return comparator
     }
 
     private func scrollViews(_ view: NSView) -> [NSScrollView] {
