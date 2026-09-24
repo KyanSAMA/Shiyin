@@ -54,39 +54,8 @@ struct AlbumDetailView: View {
                 CoverView(store: model.artwork, row: album.coverTrackID.flatMap { index.tracks[$0] }, size: 200, radius: 10)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
             }
-            AlbumTracksTable(album: album, tracks: tracks)
+            SongsTableView(model: model, rows: tracks, album: album)
         }
         .navigationTitle(album.title)
-    }
-}
-
-private struct AlbumTracksTable: View {
-    @Environment(AppModel.self) private var model
-    let album: AlbumGroup
-    let tracks: [TrackRow]
-
-    var body: some View {
-        let ui = model.ui, player = model.player
-        let multiDisc = Set(tracks.map(LibraryIndex.disc)).count > 1
-        Table(tracks, selection: Binding(get: { ui.songSelection }, set: { ui.songSelection = $0 })) {
-            TableColumn("#") { row in
-                Text(row.trackNo.map { multiDisc ? "\(LibraryIndex.disc(of: row))-\($0)" : "\($0)" } ?? "")
-                    .monospacedDigit().foregroundStyle(.secondary)
-            }
-            .width(36)
-            TableColumn("标题") { row in
-                HStack(spacing: 6) {
-                    PlayingMark(player: player, track: row.id)
-                    Text(row.title)
-                }
-            }
-            .width(min: 200, ideal: 420)
-            TableColumn("艺人") { row in
-                Text(row.artistText == album.artist ? "" : row.artistText).foregroundStyle(.secondary)
-            }
-            TableColumn("时长") { Text(clock($0.duration)).monospacedDigit() }
-                .width(48)
-        }
-        .trackActions(tracks)
     }
 }

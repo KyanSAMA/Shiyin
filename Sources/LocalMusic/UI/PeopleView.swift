@@ -49,7 +49,7 @@ struct PersonDetailView: View {
                 }
                 .frame(height: 180)
             }
-            SongsTable(rows: rows)
+            SongsTableView(model: model, rows: rows)
         }
         .navigationTitle(group.name)
     }

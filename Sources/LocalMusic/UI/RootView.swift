@@ -99,7 +99,7 @@ struct DetailView: View {
                 switch ui.sidebar {
                 case .songs:
                     let rows = ui.songs(in: index)
-                    Results(ui: ui, isEmpty: rows.isEmpty) { SongsTable(rows: rows).id(ui.listID) }
+                    Results(ui: ui, isEmpty: rows.isEmpty) { SongsTableView(model: model, rows: rows) }
                 case .albums:
                     let albums = ui.albums(in: index)
                     Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index) }
