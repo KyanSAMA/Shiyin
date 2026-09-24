@@ -151,7 +151,7 @@ enum Route: Hashable {
             let store = try LibraryStore(url: paths.database)
             library = LibraryModel(store: store)
             loudness = LoudnessModel(store: store)
-            player = try PlayerModel(library: library!, loudness: loudness, muted: options.isSelfTest)
+            player = try PlayerModel(library: library!, store: store, loudness: loudness, muted: options.isSelfTest)
             library?.onReload = { [weak library, weak player, weak loudness] in
                 player?.libraryReloaded()
                 if let library { loudness?.refresh(library.index) }
@@ -163,6 +163,7 @@ enum Route: Hashable {
         self.library = library
         self.player = player
         self.loudness = loudness
+        if let player { Task { await player.restore() } }
         if !options.isSelfTest { enableNowPlaying() }
         // AppKit retains the monitor and calls it on the main thread.
         _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] in self?.handleKey($0) ?? $0 }

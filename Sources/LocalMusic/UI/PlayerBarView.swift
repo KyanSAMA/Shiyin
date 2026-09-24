@@ -45,9 +45,15 @@ private struct NowPlayingSummary: View {
                 Text(player.current?.title ?? "未在播放")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(player.current == nil ? .secondary : .primary)
-                Text(player.current?.artistText ?? "")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                if let notice = player.skipNotice {
+                    Label(notice, systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(player.current?.artistText ?? "")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             }
             .lineLimit(1)
         }

@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Playback (and the mini player) outlive the main window; the Dock icon or 显示主窗口 brings it back.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        AppModel.shared.player?.saveBeforeQuit()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard LaunchOptions.current.isSelfTest else { return }
         let runner = SelfTestRunner(model: .shared)

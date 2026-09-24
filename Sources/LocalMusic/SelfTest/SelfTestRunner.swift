@@ -197,6 +197,13 @@ final class SelfTestRunner {
                 window.sendEvent(unhandled)
             }
             try await settle()
+        case "setVolume":
+            try player().setVolume(Float(step.number("value") ?? 1))
+        case "quit":
+            // The real quit path (saving playback on the way out); the report is written first, as the app exits there.
+            finish(status: "pass", error: nil)
+            NSApp.terminate(nil)
+            try await Task.sleep(for: .seconds(30))
         case "closeMainWindow":
             try window().performClose(nil)
             try await settle()
@@ -508,6 +515,7 @@ final class SelfTestRunner {
             "fileSampleRate": engine.fileSampleRate, "outputSampleRate": engine.outputSampleRate,
             "gainDb": engine.current?.gainDb as Any? ?? NSNull(),
             "volume": player.volume, "engineVolume": engine.volume, "lastError": player.lastError as Any? ?? NSNull(),
+            "skipNotice": player.skipNotice as Any? ?? NSNull(),
             "queue": ["count": player.queue.entries.count, "index": player.queue.index as Any? ?? NSNull(),
                       "upcomingTitles": player.queue.upcoming.prefix(5).compactMap { model.library?.index.tracks[$0.trackID]?.title },
                       "trackIds": player.queue.entries.map(\.trackID), "shuffled": player.queue.shuffled,

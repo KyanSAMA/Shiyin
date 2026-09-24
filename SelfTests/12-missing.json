@@ -1,0 +1,25 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "showQueue" },
+    { "do": "wait", "seconds": 0.3 },
+    { "do": "snapshot", "name": "queue-empty" },
+    { "do": "showQueue", "value": false },
+    { "do": "fs", "op": "remove", "path": "@out/lib/THE BOOK/01 夜に駆ける.flac" },
+    { "do": "play", "title": "夜に駆ける" },
+    { "do": "assert", "path": "player.title", "equals": "群青" },
+    { "do": "assert", "path": "player.isPlaying", "equals": true },
+    { "do": "assert", "path": "player.skipNotice", "contains": "夜に駆ける" },
+    { "do": "wait", "seconds": 0.3 },
+    { "do": "snapshot", "name": "skipped" },
+    { "do": "fs", "op": "remove", "path": "@out/lib/Gapless/02 Part 2.flac" },
+    { "do": "play", "title": "Part 1" },
+    { "do": "waitUntil", "path": "player.skipNotice", "contains": "Part 2", "timeout": 12 },
+    { "do": "assert", "path": "player.isPlaying", "equals": false },
+    { "do": "waitUntil", "path": "player.skipNotice", "equals": null, "timeout": 8 },
+    { "do": "state", "name": "end" }
+  ]
+}

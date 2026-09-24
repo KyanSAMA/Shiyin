@@ -1,16 +1,16 @@
 import Foundation
 
-public enum RepeatMode: String, Sendable, CaseIterable {
+public enum RepeatMode: String, Sendable, CaseIterable, Codable {
     case off, all, one
 }
 
 /// One occurrence of a track in the queue; the same track may be queued more than once.
-public struct QueueEntry: Sendable, Hashable, Identifiable {
+public struct QueueEntry: Sendable, Hashable, Identifiable, Codable {
     public let id: Int
     public let trackID: Int64
 }
 
-public struct PlayQueue: Sendable {
+public struct PlayQueue: Sendable, Codable {
     /// Play order (shuffled when `shuffled`).
     public private(set) var entries: [QueueEntry] = []
     public private(set) var index: Int?

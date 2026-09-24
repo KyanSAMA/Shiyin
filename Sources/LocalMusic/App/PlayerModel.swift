@@ -18,9 +18,12 @@ import LocalMusicCore
     private(set) var lyricIndex: Int?
     /// Slider value while the user drags the scrubber.
     var scrubbing: Double?
+    /// Shown for a few seconds after an unplayable entry (a missing file, say) was skipped.
+    private(set) var skipNotice: String?
 
     @ObservationIgnored let engine: PlaybackEngine
     @ObservationIgnored private let library: LibraryModel
+    @ObservationIgnored private let store: LibraryStore
     @ObservationIgnored private weak var loudness: LoudnessModel?
     @ObservationIgnored private let muted: Bool
     @ObservationIgnored private var rng = SystemRandomNumberGenerator()
@@ -28,10 +31,25 @@ import LocalMusicCore
     @ObservationIgnored private var activity: NSObjectProtocol?
     @ObservationIgnored private var lyricsTrack: Int64?
     @ObservationIgnored private var prioritized: [Int64] = []
+    /// Where a restored track resumes, until the library has loaded it.
+    @ObservationIgnored private var restoredPosition: Double?
+    @ObservationIgnored private var saveTask: Task<Void, Never>?
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    /// Nothing is saved before the last session was read, so an early change or quit can't overwrite it.
+    @ObservationIgnored private var restored = false
+    @ObservationIgnored private var savedAt = Date.distantPast
     @ObservationIgnored var onChange: (() -> Void)?
+    private static let stateKey = "playback"
 
-    init(library: LibraryModel, loudness: LoudnessModel?, muted: Bool) throws {
+    nonisolated private struct SavedState: Codable, Sendable {
+        var queue: PlayQueue
+        var position: Double
+        var volume: Float
+    }
+
+    init(library: LibraryModel, store: LibraryStore, loudness: LoudnessModel?, muted: Bool) throws {
         self.library = library
+        self.store = store
         self.loudness = loudness
         self.muted = muted
         engine = try PlaybackEngine()
@@ -106,6 +124,7 @@ import LocalMusicCore
     /// After a rescan: refresh the current row and re-read its lyrics (a sidecar may have changed).
     func libraryReloaded() {
         lyricsTrack = nil
+        loadRestored()
         sync()
     }
 
@@ -139,6 +158,57 @@ import LocalMusicCore
     func setVolume(_ value: Float) {
         volume = min(max(value, 0), 1)
         engine.volume = muted ? 0 : volume
+        scheduleSave()
+    }
+
+    // MARK: Persistence
+
+    /// Last session's queue, modes, volume and position, loaded paused.
+    func restore() async {
+        defer { restored = true }
+        guard let state = try? await store.setting(Self.stateKey, as: SavedState.self),
+              state.queue.index.map(state.queue.entries.indices.contains) ?? true, queue.entries.isEmpty else { return }
+        queue = state.queue
+        volume = min(max(state.volume, 0), 1)
+        engine.volume = muted ? 0 : volume
+        restoredPosition = state.position
+        loadRestored()
+    }
+
+    private func loadRestored() {
+        guard let position = restoredPosition, engine.current == nil, let entry = queue.current, let item = item(entry) else { return }
+        restoredPosition = nil
+        perform { try engine.play(item, at: position, autoplay: false) }
+    }
+
+    /// A track played to its end starts over next time; a restore still waiting for the library keeps its position.
+    private var savedState: SavedState {
+        let finished = duration > 0 && position >= duration - 0.5
+        return SavedState(queue: queue, position: restoredPosition ?? (finished ? 0 : position), volume: volume)
+    }
+
+    /// On quit, blocking: while a termination is pending, AppKit's run loop mode doesn't run main-actor tasks.
+    func saveBeforeQuit() {
+        guard restored else { return }
+        let state = savedState, store = store, key = Self.stateKey
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            try? await store.setSetting(key, state)
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
+    }
+
+    /// Coalesces a burst of changes (a volume drag, skipping through tracks) into one write.
+    private func scheduleSave() {
+        guard restored, saveTask == nil else { return }
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self else { return }
+            saveTask = nil
+            savedAt = .now
+            try? await store.setSetting(Self.stateKey, savedState)
+        }
     }
 
     func playNext(_ tracks: [Int64]) {
@@ -179,6 +249,7 @@ import LocalMusicCore
     /// Plays the current entry; an unplayable one is skipped, at most once per queue entry so an all-bad queue on
     /// repeat can't spin.
     private func startCurrent(attempt: Int = 0) {
+        restoredPosition = nil
         guard let entry = queue.current else {
             engine.stop()
             return sync()
@@ -189,10 +260,20 @@ import LocalMusicCore
             lastError = nil
         } catch {
             lastError = String(describing: error)
+            noteSkipped(library.index.tracks[entry.trackID]?.title)
             engine.stop()
             if attempt + 1 < queue.entries.count, queue.skipForward() != nil { return startCurrent(attempt: attempt + 1) }
         }
         sync()
+    }
+
+    private func noteSkipped(_ title: String?) {
+        skipNotice = "无法播放「\(title ?? "已移出曲库的曲目")」"
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(6))
+            if !Task.isCancelled { self?.skipNotice = nil }
+        }
     }
 
     private func perform(_ action: () throws -> Void) {
@@ -213,6 +294,7 @@ import LocalMusicCore
             break
         case .failed(let item, let message):
             lastError = message
+            noteSkipped(library.index.tracks[item.trackID]?.title ?? item.url.deletingPathExtension().lastPathComponent)
             queue.select(item.entryID)
             if queue.skipForward() != nil { return startCurrent(attempt: 1) }
         }
@@ -228,6 +310,7 @@ import LocalMusicCore
         loadLyricsIfNeeded()
         updateLyricIndex()
         prioritizeLoudness()
+        scheduleSave()
         if isPlaying, ticker == nil {
             ticker = Task { [weak self] in
                 while !Task.isCancelled {
@@ -253,6 +336,7 @@ import LocalMusicCore
         } else {
             position = engine.position
             updateLyricIndex()
+            if isPlaying, savedAt.timeIntervalSinceNow < -10 { scheduleSave() }
         }
     }
 

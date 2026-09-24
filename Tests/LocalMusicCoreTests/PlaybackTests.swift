@@ -63,6 +63,18 @@ struct PlayQueueTests {
         #expect(q.shuffled && q.current?.trackID == 14 && q.index == 0)
     }
 
+    /// A restored queue keeps its play order, the list order to unshuffle to, and fresh entry ids.
+    @Test mutating func roundTripsThroughJSON() throws {
+        var q = queue(Array(1...10), start: 3, repeat: .all)
+        q.setShuffle(true, using: &rng)
+        var restored = try JSONDecoder().decode(PlayQueue.self, from: JSONEncoder().encode(q))
+        #expect(restored.entries == q.entries && restored.index == q.index && restored.shuffled && restored.repeatMode == .all)
+        restored.append([99])
+        #expect(Set(restored.entries.map(\.id)).count == 11)
+        restored.setShuffle(false, using: &rng)
+        #expect(restored.entries.map(\.trackID) == Array(1...10) + [99] && restored.current?.trackID == 4)
+    }
+
     @Test func editsTheQueue() {
         var q = queue([1, 2, 3], start: 0)
         q.insertNext([9])

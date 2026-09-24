@@ -4,7 +4,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 
 ## 命令
 - 构建 / 测试：`swift build`、`swift test`
-- 打包：`Scripts/bundle.sh [debug|release]` → `build/LocalMusic.app`（ad-hoc 签名；日常使用打 release，debug 版响度分析慢约 10 倍）
+- 打包：`Scripts/bundle.sh [debug|release]` → `build/LocalMusic.app`（ad-hoc 签名；图标由 `Scripts/make-icon.swift` 生成到 `.build/AppIcon.icns`；日常使用打 release，debug 版响度分析慢约 10 倍）
 - 自测：`Scripts/selftest.sh SelfTests/NN-*.json` → `.build/selftest/<name>/`（PNG、`*.state.json`、`report.json`、`app.log`）；退出码 0 通过 / 1 失败 / 2 超时或崩溃
 - 全部自测：`Scripts/run-all-selftests.sh`（结束时用 `find -newer` 证明 `~/Music` 未被写入）；夹具由 `Scripts/make-fixtures.sh` 生成到 `.build/fixtures`（改动时递增 VERSION）
 - 无障碍操作：`swift Scripts/ax-press.swift <文本>`（或先 `swiftc -O` 编译），对运行中 App 里标题/描述/值等于该文本的元素做 AX 选中行 / 按下
@@ -24,14 +24,16 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
 - 自建窗口（迷你播放器面板）里的 `NSHostingView` 不能直接当 `contentView`：即使 `sizingOptions = []`，它仍会在 `windowDidLayout` 里按内容理想尺寸（含标题栏安全区）改窗口大小；作为子视图加 autoresizing 即可
 - 按键：空格播放 / 暂停和「编辑文本时 ⌘ 方向键交给输入框」都在 `AppModel.handleKey`（本地按键监听，先于菜单快捷键）：无修饰键的菜单快捷键会吞掉搜索框里的空格，⌘←→ 菜单项会抢走光标移动
+- 退出时 `.terminateLater` 期间主线程跑的是不执行 MainActor 任务的 run loop 模式，异步保存会卡死退出：`applicationWillTerminate` 里交给 store actor 并用信号量等待（≤2 s）
 - `Commands` 菜单只在打开时重读模型状态，且禁用的菜单项仍会吞掉自己的快捷键：带快捷键的菜单项不按动态状态禁用，由动作本身判断
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album） `filter`（`albumArtists`/`years`/`genres`/`formats` 数组、`hiRes`/`hasLyrics` 布尔，都缺省即清空） `miniPlayer`（`value`，缺省 true） `focusSearch` `pressKey`（`key`: space/f/l/m/left/right/up/down，`modifiers`: command/shift/option，`repeat`；按前台 App 的路径走 `handleKey` → 窗口快捷键 → 菜单快捷键 → 窗口，因为 AppKit 不给非活动 App 匹配快捷键） `closeMainWindow` `openMainWindow`
-- 状态键：`app` `ui`（含 `filterChips`、`searchFocused`、`nowPlaying`） `windows`（含 `mini` 面板层级/空间/尺寸、`scrolls` 滚动偏移） `library` `player`（含 `queue`、`gainDb`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf`
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album） `filter`（`albumArtists`/`years`/`genres`/`formats` 数组、`hiRes`/`hasLyrics` 布尔，都缺省即清空） `miniPlayer`（`value`，缺省 true） `focusSearch` `pressKey`（`key`: space/f/l/m/left/right/up/down，`modifiers`: command/shift/option，`repeat`；按前台 App 的路径走 `handleKey` → 窗口快捷键 → 菜单快捷键 → 窗口，因为 AppKit 不给非活动 App 匹配快捷键） `closeMainWindow` `openMainWindow` `setVolume`（`value`） `quit`（先写报告，再走真实退出路径，含保存播放状态）
+- 状态键：`app` `ui`（含 `filterChips`、`searchFocused`、`nowPlaying`） `windows`（含 `mini` 面板层级/空间/尺寸、`scrolls` 滚动偏移） `library` `player`（含 `queue`、`gainDb`、`skipNotice`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf`
 - 自测模式关闭全部动画（根视图 `.transaction`）：显示器睡眠时动画不推进，带动画的滚动 / 转场会停在第一帧
 - 路径占位：`@out`、`@fixtures`
+- 重启：脚本顶层 `"relaunch": "<相对路径>"` 时，第一段通过后用同一数据目录再启动一次跑第二段（`@out` 为 `<out>/relaunch`）；第二段放 `SelfTests/relaunch/`，不被全量自测单独执行
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
 
 ## Spike 结论（第 1 步）

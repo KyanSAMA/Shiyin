@@ -16,7 +16,10 @@ struct QueueView: View {
             Section {
                 ForEach(upcoming) { entry in
                     QueueRow(store: model.artwork, row: tracks[entry.trackID])
-                        .contextMenu { Button("从队列中移除") { player.remove([entry.id]) } }
+                        .contextMenu {
+                            Button("从队列中移除") { player.remove([entry.id]) }
+                            if let row = tracks[entry.trackID] { Button("在访达中显示") { revealInFinder([row]) } }
+                        }
                 }
                 .onMove { source, destination in
                     player.moveUpcoming(source.map { upcoming[$0].id }, before: destination < upcoming.count ? upcoming[destination].id : nil)
@@ -30,6 +33,11 @@ struct QueueView: View {
                         .buttonStyle(.borderless)
                         .disabled(upcoming.isEmpty)
                 }
+            }
+        }
+        .overlay {
+            if player.queue.entries.isEmpty {
+                ContentUnavailableView("队列为空", systemImage: "list.bullet", description: Text("双击歌曲开始播放，或在右键菜单里添加到队列"))
             }
         }
     }

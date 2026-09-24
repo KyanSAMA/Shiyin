@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import LocalMusicCore
 
@@ -58,6 +59,9 @@ private struct TrackActions: ViewModifier {
         content.contextMenu(forSelectionType: TrackRow.ID.self) { ids in
             Button("播放下一首") { model.player?.playNext(ordered(ids)) }
             Button("添加到队列") { model.player?.addToQueue(ordered(ids)) }
+            Divider()
+            Button("在访达中显示") { revealInFinder(rows.filter { ids.contains($0.id) }) }
+                .disabled(ids.isEmpty)
         } primaryAction: { ids in
             guard let start = rows.firstIndex(where: { ids.contains($0.id) }) else { return }
             model.player?.play(rows.map(\.id), startAt: start)
@@ -97,6 +101,10 @@ struct CollectionHeader<Artwork: View>: View {
         }
         .padding(24)
     }
+}
+
+func revealInFinder(_ rows: [TrackRow]) {
+    NSWorkspace.shared.activateFileViewerSelecting(rows.map(\.url))
 }
 
 func summary(count: Int, seconds: Double) -> String {

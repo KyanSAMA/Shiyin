@@ -1,0 +1,21 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "player.title", "equals": "夜に駆ける", "timeout": 10 },
+    { "do": "assert", "path": "player.isPlaying", "equals": false },
+    { "do": "assert", "path": "player.position", "approx": 9.8, "tol": 0.8 },
+    { "do": "assert", "path": "player.queue.count", "equals": 2 },
+    { "do": "assert", "path": "player.queue.repeat", "equals": "all" },
+    { "do": "assert", "path": "player.volume", "approx": 0.3, "tol": 0.001 },
+    { "do": "assert", "path": "lyrics.lineCount", "equals": 14 },
+    { "do": "wait", "seconds": 0.5 },
+    { "do": "snapshot", "name": "restored" },
+    { "do": "resume" },
+    { "do": "wait", "seconds": 1 },
+    { "do": "assert", "path": "player.isPlaying", "equals": true },
+    { "do": "assert", "path": "player.position", "gt": 10 },
+    { "do": "state", "name": "end" }
+  ]
+}

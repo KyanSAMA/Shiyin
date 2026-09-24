@@ -12,6 +12,9 @@ APP=build/LocalMusic.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/LocalMusic" "$APP/Contents/MacOS/"
+ICON=.build/AppIcon.icns
+[ "$ICON" -nt Scripts/make-icon.swift ] || swift Scripts/make-icon.swift "$ICON"
+cp "$ICON" "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,6 +23,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <dict>
   <key>CFBundleIdentifier</key><string>io.github.kyansama.localmusic</string>
   <key>CFBundleExecutable</key><string>LocalMusic</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleName</key><string>本地音乐</string>
   <key>CFBundleDisplayName</key><string>本地音乐</string>
   <key>CFBundlePackageType</key><string>APPL</string>

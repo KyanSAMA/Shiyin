@@ -1,0 +1,18 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "relaunch": "relaunch/11-restore.json",
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "play", "title": "夜に駆ける" },
+    { "do": "setRepeat", "value": "all" },
+    { "do": "setVolume", "value": 0.5 },
+    { "do": "seek", "seconds": 5 },
+    { "do": "wait", "seconds": 1.5 },
+    { "do": "seek", "seconds": 9.5 },
+    { "do": "setVolume", "value": 0.3 },
+    { "do": "assert", "path": "player.isPlaying", "equals": true },
+    { "do": "quit" }
+  ]
+}
