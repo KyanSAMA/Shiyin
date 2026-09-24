@@ -1,0 +1,195 @@
+{
+  "timeout": 90,
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "steps": [
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/library",
+      "to": "@out/lib"
+    },
+    {
+      "do": "startLibrary",
+      "include": [
+        "@out/lib"
+      ],
+      "exclude": [
+        "@out/lib/Music"
+      ]
+    },
+    {
+      "do": "play",
+      "title": "夜に駆ける"
+    },
+    {
+      "do": "showNowPlaying"
+    },
+    {
+      "do": "waitUntil",
+      "path": "lyrics.lineCount",
+      "equals": 14,
+      "timeout": 3
+    },
+    {
+      "do": "waitUntil",
+      "path": "lyrics.index",
+      "equals": 4,
+      "timeout": 6
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.currentText",
+      "equals": "「さよなら」だけだった"
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.currentTranslation",
+      "equals": "只有一句「再见」"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.6
+    },
+    {
+      "do": "snapshot",
+      "name": "nowplaying"
+    },
+    {
+      "do": "seekToLyric",
+      "index": 10
+    },
+    {
+      "do": "assert",
+      "path": "player.position",
+      "approx": 9.0,
+      "tol": 0.3
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.index",
+      "equals": 10
+    },
+    {
+      "do": "wait",
+      "seconds": 0.6
+    },
+    {
+      "do": "snapshot",
+      "name": "nowplaying-seek"
+    },
+    {
+      "do": "play",
+      "title": "歌"
+    },
+    {
+      "do": "waitUntil",
+      "path": "lyrics.lineCount",
+      "equals": 2,
+      "timeout": 3
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.synced",
+      "equals": true
+    },
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/sidecar-5.lrc",
+      "to": "@out/lib/sidecar/歌.lrc"
+    },
+    {
+      "do": "rescan"
+    },
+    {
+      "do": "waitUntil",
+      "path": "lyrics.lineCount",
+      "equals": 5,
+      "timeout": 3
+    },
+    {
+      "do": "play",
+      "title": "群青"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.8
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.lineCount",
+      "equals": 0
+    },
+    {
+      "do": "assert",
+      "path": "lyrics.scrollTarget",
+      "equals": "top"
+    },
+    {
+      "do": "snapshot",
+      "name": "no-lyrics"
+    },
+    {
+      "do": "showQueue"
+    },
+    {
+      "do": "assert",
+      "path": "ui.depth",
+      "equals": 0
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "queue-over-page"
+    },
+    {
+      "do": "showQueue",
+      "value": false
+    },
+    {
+      "do": "showNowPlaying",
+      "value": false
+    },
+    {
+      "do": "play",
+      "title": "夜に駆ける"
+    },
+    {
+      "do": "playNext",
+      "title": "Part 1"
+    },
+    {
+      "do": "assert",
+      "path": "player.queue.upcomingTitles",
+      "equals": [
+        "Part 1",
+        "群青"
+      ]
+    },
+    {
+      "do": "showQueue"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "queue"
+    },
+    {
+      "do": "state",
+      "name": "end"
+    }
+  ]
+}

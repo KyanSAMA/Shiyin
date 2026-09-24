@@ -11,6 +11,9 @@ import LocalMusicCore
 final class ArtworkStore {
     private let cache: ArtworkCache
     private var boxes: [String: (box: ArtworkBox, used: UInt64)] = [:]
+    private var backdrops: [Int64: ArtworkBox] = [:]
+    /// The most recently rendered backdrop, shown while the next one renders.
+    let lastBackdrop = ArtworkBox()
     private var clock: UInt64 = 0
     private var bytes = 0
     private static let budget = 120 << 20, maxBoxes = 4000
@@ -47,6 +50,30 @@ final class ArtworkStore {
     }
 
     private static func cost(_ image: CGImage) -> Int { image.bytesPerRow * image.height }
+
+    func image(for row: TrackRow, pixels: Int) async -> CGImage? {
+        await cache.image(for: row, pixels: pixels)
+    }
+
+    /// Blurred Now Playing background for a track (a few recent ones kept).
+    func backdrop(_ row: TrackRow) -> ArtworkBox {
+        if let box = backdrops[row.id] { return box }
+        if backdrops.count >= 4 { backdrops.removeAll() }
+        let box = ArtworkBox()
+        backdrops[row.id] = box
+        return box
+    }
+
+    func loadBackdrop(_ box: ArtworkBox, _ row: TrackRow) async {
+        guard !box.requested else { return }
+        box.requested = true
+        guard let cover = await cache.image(for: row, pixels: 480) else {
+            if Task.isCancelled { box.requested = false }
+            return
+        }
+        box.image = await Task.detached { Backdrop.render(cover) }.value
+        if box.image != nil { lastBackdrop.image = box.image }
+    }
 }
 
 /// Square cover; `size == nil` fills the available width. Takes the store explicitly: it is used inside Table cells,

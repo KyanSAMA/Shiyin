@@ -11,6 +11,11 @@ import LocalMusicCore
     private(set) var duration: Double = 0
     private(set) var volume: Float = 1
     private(set) var lastError: String?
+    private(set) var lyrics: Lyrics?
+    /// True between a track change and its lyrics arriving (so the page doesn't flash 暂无歌词).
+    private(set) var lyricsLoading = false
+    /// Changes only when playback crosses a line, so the lyric list doesn't re-render at 20 Hz.
+    private(set) var lyricIndex: Int?
     /// Slider value while the user drags the scrubber.
     var scrubbing: Double?
 
@@ -20,6 +25,7 @@ import LocalMusicCore
     @ObservationIgnored private var rng = SystemRandomNumberGenerator()
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var activity: NSObjectProtocol?
+    @ObservationIgnored private var lyricsTrack: Int64?
     @ObservationIgnored var onChange: (() -> Void)?
 
     init(library: LibraryModel, muted: Bool) throws {
@@ -27,7 +33,7 @@ import LocalMusicCore
         self.muted = muted
         engine = try PlaybackEngine()
         engine.volume = muted ? 0 : volume
-        engine.nextItem = { [weak self] in self?.queue.peekNext().flatMap { self?.item($0) } }
+        engine.nextItem = { [weak self] in self?.nextPlayable() }
         engine.onEvent = { [weak self] in self?.handle($0) }
     }
 
@@ -79,6 +85,32 @@ import LocalMusicCore
         perform { try engine.seek(to: seconds) }
     }
 
+    func seekToLyric(_ index: Int) {
+        guard case .synced(let lines) = lyrics, lines.indices.contains(index) else { return }
+        seek(to: lines[index].time)
+    }
+
+    func remove(_ entries: Set<Int>) {
+        if queue.remove(entries) { return startCurrent() }
+        queueEdited()
+    }
+
+    func moveUpcoming(_ entries: [Int], before target: Int?) {
+        queue.moveUpcoming(entries, before: target)
+        queueEdited()
+    }
+
+    /// After a rescan: refresh the current row and re-read its lyrics (a sidecar may have changed).
+    func libraryReloaded() {
+        lyricsTrack = nil
+        sync()
+    }
+
+    func clearUpcoming() {
+        queue.clearUpcoming()
+        queueEdited()
+    }
+
     func setShuffle(_ on: Bool) {
         queue.setShuffle(on, using: &rng)
         engine.nextChanged()
@@ -111,6 +143,16 @@ import LocalMusicCore
     private func queueEdited() {
         engine.nextChanged()
         sync()
+    }
+
+    /// What automatic advance would play, skipping entries whose track left the library.
+    private func nextPlayable() -> PlaybackItem? {
+        var probe = queue
+        for _ in queue.entries.indices {
+            guard let entry = probe.advance() else { return nil }
+            if let item = item(entry) { return item }
+        }
+        return nil
     }
 
     private func item(_ entry: QueueEntry) -> PlaybackItem? {
@@ -166,6 +208,8 @@ import LocalMusicCore
         isPlaying = engine.isPlaying
         duration = engine.duration
         position = engine.position
+        loadLyricsIfNeeded()
+        updateLyricIndex()
         if isPlaying, ticker == nil {
             ticker = Task { [weak self] in
                 while !Task.isCancelled {
@@ -190,6 +234,27 @@ import LocalMusicCore
             sync()
         } else {
             position = engine.position
+            updateLyricIndex()
         }
+    }
+
+    private func loadLyricsIfNeeded() {
+        guard current?.id != lyricsTrack else { return }
+        lyricsTrack = current?.id
+        lyrics = nil
+        guard let track = current, track.hasLyrics else { return lyricsLoading = false }
+        lyricsLoading = true
+        Task {
+            let loaded = await library.lyrics(for: track.id)
+            guard lyricsTrack == track.id else { return }
+            lyrics = loaded
+            lyricsLoading = false
+            updateLyricIndex()
+        }
+    }
+
+    private func updateLyricIndex() {
+        let index = lyrics?.index(at: position)
+        if index != lyricIndex { lyricIndex = index }
     }
 }

@@ -133,3 +133,42 @@ struct ArtworkTests {
         #expect(album.trackIDs == [2, 3, 1] && album.coverTrackID == 2)
     }
 }
+
+struct BackdropTests {
+    private func image(_ fill: (Int, Int) -> (UInt8, UInt8, UInt8), size: Int = 32) -> CGImage {
+        let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        for y in 0..<size {
+            for x in 0..<size {
+                let (r, g, b) = fill(x, y)
+                ctx.setFillColor(CGColor(srgbRed: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, alpha: 1))
+                ctx.fill(CGRect(x: x, y: y, width: 1, height: 1))
+            }
+        }
+        return ctx.makeImage()!
+    }
+
+    @Test func rendersASmallBlurredBitmap() throws {
+        let backdrop = try #require(Backdrop.render(image({ x, y in ((x + y) % 2 == 0 ? 255 : 0, 0, 0) }, size: 400)))
+        #expect(backdrop.width == 96 && backdrop.height == 96)
+        #expect(ImageStats(image: backdrop, stride: 1)!.lumaStdDev < 10)
+    }
+}
+
+struct LyricsSourceTests {
+    @Test func prefersSidecarLyrics() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "lm-lrc-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let store = try LibraryStore(url: dir.appending(path: "db.sqlite"))
+        try FLACBuilder.file([(0, FLACBuilder.streamInfo(rate: 44100, channels: 2, bitDepth: 16, total: 44100)),
+                              (4, FLACBuilder.comments(["LYRICS=[00:01.00]embedded"]))]).write(to: dir.appending(path: "a.flac"))
+        let roots = LibraryRoots(include: [dir.path], exclude: [])
+        _ = try await LibraryScanner.scan(store: store, roots: roots)
+        let id = try #require(try await store.rows().first?.id)
+        #expect(try await store.lyrics(for: id) == .synced([LyricLine(time: 1, text: "embedded")]))
+        try Data("[00:02.00]sidecar".utf8).write(to: dir.appending(path: "a.lrc"))
+        _ = try await LibraryScanner.scan(store: store, roots: roots)
+        #expect(try await store.lyrics(for: id) == .synced([LyricLine(time: 2, text: "sidecar")]))
+    }
+}

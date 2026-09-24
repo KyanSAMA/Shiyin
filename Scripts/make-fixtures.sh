@@ -7,7 +7,7 @@
 #   extra/     files copied in at runtime to exercise FSEvents
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=2
+VERSION=3
 OUT=.build/fixtures
 [ "$(cat "$OUT/.version" 2>/dev/null)" = "$VERSION" ] && exit 0
 rm -rf "$OUT"
@@ -66,6 +66,7 @@ audio "$LIB/wav/untagged.wav" 2 44100 "-c:a pcm_s16le" -
 audio "$LIB/53.无标签标题.flac" 2 44100 "$FLAC16" -
 audio "$LIB/sidecar/歌.flac" 3 44100 "$FLAC16" -
 printf '[00:00.50]侧边歌词第一行\n[00:01.50]第二行\n' > "$LIB/sidecar/歌.lrc"
+printf '[00:00.20]一\n[00:00.60]二\n[00:01.00]三\n[00:01.40]四\n[00:01.80]五\n' > "$OUT/sidecar-5.lrc"
 
 for part in 1 2; do
   trim=$([ $part = 1 ] && echo "end_sample=264601" || echo "start_sample=264601")

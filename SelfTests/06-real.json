@@ -1,0 +1,16 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "play", "title": "グッドバイ", "context": "songs" },
+    { "do": "waitUntil", "path": "lyrics.lineCount", "gt": 20, "timeout": 3 },
+    { "do": "assert", "path": "lyrics.consecutiveDuplicates", "equals": 0 },
+    { "do": "showNowPlaying" },
+    { "do": "seek", "seconds": 60 },
+    { "do": "wait", "seconds": 1.5 },
+    { "do": "assert", "path": "lyrics.index", "gt": 3 },
+    { "do": "snapshot", "name": "nowplaying" },
+    { "do": "state", "name": "end" }
+  ]
+}

@@ -121,6 +121,14 @@ public actor LibraryStore {
         if let sidecar = track.sidecarLyrics { try lyrics.run([id, "sidecar", sidecar]) }
     }
 
+    /// A sidecar `.lrc` wins over embedded lyrics, so lyrics can be fixed without touching the audio file.
+    public func lyrics(for trackID: Int64) throws -> Lyrics? {
+        // An empty or header-only sidecar parses to nil and must not hide embedded lyrics.
+        try db.query("SELECT lrc FROM lyrics WHERE track_id = ? ORDER BY source = 'sidecar' DESC", [trackID]) {
+            $0.string(0)
+        }.lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
+    }
+
     /// Playable tracks (files that failed to parse are kept only to avoid re-parsing them).
     public func rows() throws -> [TrackRow] {
         var people: [Int64: (artists: [String], composers: [String])] = [:]

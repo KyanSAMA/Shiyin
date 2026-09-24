@@ -60,6 +60,12 @@ enum Route: Hashable {
     var search = ""
     var songSort = [KeyPathComparator(\TrackRow.title, comparator: .localizedStandard)]
     var songSelection: Set<Int64> = []
+    var nowPlayingShown = false
+    var lyricsPosition = ScrollPosition(idType: Int.self)
+    /// Self-tests turn animations off: with the display asleep they never advance, so an animated scroll or
+    /// transition would stay at its first frame.
+    var animationsEnabled = true
+    var queueShown = false
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var filteredMemo: (index: UUID, search: String, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
 
@@ -100,6 +106,7 @@ enum Route: Hashable {
         do {
             library = LibraryModel(store: try LibraryStore(url: paths.database))
             player = try PlayerModel(library: library!, muted: options.isSelfTest)
+            library?.onReload = { [weak player] in player?.libraryReloaded() }
         } catch {
             startupError = String(describing: error)
         }
@@ -111,7 +118,7 @@ enum Route: Hashable {
     /// Registers media keys / Control Center. Self-tests opt in explicitly so they never grab the user's media keys.
     func enableNowPlaying() {
         guard let player, nowPlaying == nil else { return }
-        let bridge = NowPlayingBridge(player: player)
+        let bridge = NowPlayingBridge(player: player, artwork: artwork)
         nowPlaying = bridge
         player.onChange = { [unowned player] in bridge.update(player) }
     }

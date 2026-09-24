@@ -15,6 +15,7 @@ import LocalMusicCore
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var rescanRequested = false
+    @ObservationIgnored var onReload: (() -> Void)?
 
     init(store: LibraryStore) {
         self.store = store
@@ -92,9 +93,14 @@ import LocalMusicCore
         await scan()
     }
 
+    func lyrics(for trackID: Int64) async -> Lyrics? {
+        (try? await store.lyrics(for: trackID)) ?? nil
+    }
+
     private func reload() async throws {
         let rows = try await store.rows()
         index = await Task.detached { LibraryIndex(rows: rows) }.value
+        onReload?()
     }
 
     private func watch() {

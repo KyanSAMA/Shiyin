@@ -48,6 +48,7 @@ final class SelfTestRunner {
                 throw SelfTestFailure(description: "\"steps\" must be a non-empty array of objects")
             }
             watchdog.arm(after: script.number("timeout") ?? 120, onTimeout: Self.timeoutHandler(report: reportURL))
+            model.ui.animationsEnabled = false
             try await prepareWindow(script)
             for (i, step) in steps.enumerated() {
                 let action = step.string("do") ?? "?"
@@ -154,6 +155,18 @@ final class SelfTestRunner {
             let r = engine.meter.reading
             measures[try step.required("name")] = ["seconds": r.seconds, "rmsDbfs": r.rmsDbfs, "peakDbfs": r.peakDbfs,
                                                    "maxStep": r.maxStep, "longestGapMs": r.longestGapMs]
+        case "showNowPlaying":
+            model.ui.nowPlayingShown = step["value"] as? Bool ?? true
+            try await settle()
+        case "showQueue":
+            model.ui.queueShown = step["value"] as? Bool ?? true
+            try await settle()
+        case "seekToLyric":
+            try player().seekToLyric(Int(step.number("index") ?? 0))
+        case "playNext":
+            let title = try step.required("title")
+            guard let song = try library().index.songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
+            try player().playNext([song.id])
         case "enableNowPlaying":
             model.enableNowPlaying()
         case "openSettings":
@@ -185,12 +198,13 @@ final class SelfTestRunner {
         }
     }
 
+    private func scrollViews(_ view: NSView) -> [NSScrollView] {
+        (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+    }
+
     /// Scrolls the tallest scroll view in the main window from top to bottom, like a user flicking through;
     /// `steps: 0` only jumps back to the top.
     private func scrollList(steps: Int, interval: Double) async throws {
-        func scrollViews(_ view: NSView) -> [NSScrollView] {
-            (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
-        }
         guard let root = try window().contentView,
               let scroll = scrollViews(root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
         else { throw SelfTestFailure(description: "no scroll view") }
@@ -200,6 +214,13 @@ final class SelfTestRunner {
             scroll.reflectScrolledClipView(scroll.contentView)
             try await Task.sleep(for: .seconds(interval))
         }
+    }
+
+    private func scrollOffsets() -> [Step] {
+        (mainWindow?.contentView).map(scrollViews)?.map {
+            ["width": $0.frame.width, "height": $0.frame.height, "contentHeight": $0.documentView?.frame.height ?? 0,
+             "y": $0.contentView.bounds.origin.y] as Step
+        } ?? []
     }
 
     /// Titles or names the current page shows, in display order.
@@ -377,9 +398,10 @@ final class SelfTestRunner {
                     "storeOpen": model.library != nil, "isActive": NSApp.isActive],
             "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
-            "windows": ["main": main],
+            "windows": ["main": main, "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
             "player": model.player.map(playerState) ?? NSNull(),
+            "lyrics": model.player.map(lyricsState) ?? NSNull(),
             "measure": measures,
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
@@ -410,9 +432,25 @@ final class SelfTestRunner {
             "fileSampleRate": engine.fileSampleRate, "outputSampleRate": engine.outputSampleRate,
             "volume": player.volume, "engineVolume": engine.volume, "lastError": player.lastError as Any? ?? NSNull(),
             "queue": ["count": player.queue.entries.count, "index": player.queue.index as Any? ?? NSNull(),
+                      "upcomingTitles": player.queue.upcoming.prefix(5).compactMap { model.library?.index.tracks[$0.trackID]?.title },
                       "trackIds": player.queue.entries.map(\.trackID), "shuffled": player.queue.shuffled,
                       "repeat": player.queue.repeatMode.rawValue] as Step,
         ]
+    }
+
+    private func lyricsState(_ player: PlayerModel) -> Step {
+        let lines: [LyricLine] = switch player.lyrics {
+        case .synced(let lines)?: lines
+        case .unsynced(let texts)?: texts.map { LyricLine(time: 0, text: $0) }
+        case nil: []
+        }
+        let current = player.lyricIndex.map { lines[$0] }
+        let position = model.ui.lyricsPosition
+        return ["lineCount": lines.count, "index": player.lyricIndex as Any? ?? NSNull(), "loading": player.lyricsLoading,
+                "scrollTarget": position.viewID(type: Int.self).map { "line \($0)" } ?? (position.edge == .top ? "top" : "none"),
+                "synced": { if case .synced = player.lyrics { true } else { false } }(),
+                "currentText": current?.text as Any? ?? NSNull(), "currentTranslation": current?.translation as Any? ?? NSNull(),
+                "consecutiveDuplicates": zip(lines, lines.dropFirst()).filter { $0.text == $1.text && !$0.text.isEmpty }.count]
     }
 
     private func nowPlayingState() -> Any {

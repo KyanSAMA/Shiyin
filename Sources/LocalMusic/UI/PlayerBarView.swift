@@ -7,7 +7,7 @@ struct PlayerBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             if let player = model.player {
-                NowPlayingSummary(player: player, artwork: model.artwork)
+                NowPlayingSummary(player: player, artwork: model.artwork, ui: model.ui)
                     .frame(width: 260, alignment: .leading)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
@@ -16,8 +16,9 @@ struct PlayerBarView: View {
                 }
                 .frame(maxWidth: 520)
                 Spacer(minLength: 0)
+                PageToggles(ui: model.ui, hasTrack: player.current != nil)
                 VolumeControl(player: player)
-                    .frame(width: 150)
+                    .frame(width: 130)
             }
         }
         .padding(.horizontal, 16)
@@ -29,10 +30,16 @@ struct PlayerBarView: View {
 private struct NowPlayingSummary: View {
     let player: PlayerModel
     let artwork: ArtworkStore
+    let ui: UIState
 
     var body: some View {
         HStack(spacing: 10) {
-            CoverView(store: artwork, row: player.current, size: 48, radius: 6)
+            Button { ui.nowPlayingShown.toggle() } label: {
+                CoverView(store: artwork, row: player.current, size: 48, radius: 6)
+            }
+            .buttonStyle(.plain)
+            .disabled(player.current == nil)
+            .help("播放页")
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.current?.title ?? "未在播放")
                     .font(.system(size: 13, weight: .semibold))
@@ -75,6 +82,23 @@ private struct TransportControls: View {
     private func toggle(_ title: String, _ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
         button(title, symbol, size: 13, action: action)
             .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+    }
+}
+
+private struct PageToggles: View {
+    let ui: UIState
+    let hasTrack: Bool
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble").labelStyle(.iconOnly) }
+                .foregroundStyle(ui.nowPlayingShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .disabled(!hasTrack)
+            Button { ui.queueShown.toggle() } label: { Label("播放队列", systemImage: "list.bullet").labelStyle(.iconOnly) }
+                .foregroundStyle(ui.queueShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+        }
+        .buttonStyle(.plain)
+        .font(.system(size: 14))
     }
 }
 

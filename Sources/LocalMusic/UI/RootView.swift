@@ -8,19 +8,35 @@ struct RootView: View {
     var body: some View {
         @Bindable var ui = model.ui
         VStack(spacing: 0) {
-            NavigationSplitView {
-                SidebarView()
-            } detail: {
-                NavigationStack(path: $ui.path) {
-                    DetailView()
-                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+            ZStack {
+                NavigationSplitView {
+                    SidebarView()
+                } detail: {
+                    NavigationStack(path: $ui.path) {
+                        DetailView()
+                            .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                    }
+                }
+                .searchable(text: $ui.search, placement: .toolbar, prompt: "搜索")
+                .toolbar(ui.nowPlayingShown ? .hidden : .visible, for: .windowToolbar)
+                .disabled(ui.nowPlayingShown)   // keep focus, type-select and VoiceOver out of the covered library
+                if ui.nowPlayingShown, let player = model.player {
+                    NowPlayingView(player: player)
+                        .ignoresSafeArea(edges: .top)
+                        .transition(.move(edge: .bottom))
                 }
             }
-            .searchable(text: $ui.search, placement: .toolbar, prompt: "搜索")
+            .animation(.easeInOut(duration: 0.3), value: ui.nowPlayingShown)
+            .inspector(isPresented: $ui.queueShown) {
+                if let player = model.player {
+                    QueueView(player: player).inspectorColumnWidth(min: 240, ideal: 300, max: 420)
+                }
+            }
             Divider()
             PlayerBarView()
         }
         .frame(minWidth: 900, minHeight: 560)
+        .transaction { if !ui.animationsEnabled { $0.disablesAnimations = true; $0.animation = nil } }
         .task {
             model.ui.openSettings = openSettings
             await model.startLibrary()

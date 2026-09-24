@@ -19,13 +19,15 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 数据库迁移只追加，不修改已提交的迁移
 - 交给 AVFAudio / MediaPlayer / FSEvents 的回调闭包在 `LocalMusicCore` 的非隔离代码或 `nonisolated static` 工厂里构造，只捕获 Sendable 值，再 `Task { @MainActor in … }` 切回
 - App 目标默认 MainActor 隔离；纯逻辑放 `LocalMusicCore` 以便单测
+- 布局：`scaledToFill` 的图片放 `.background` 并 `.clipped()`，作为 ZStack 子视图会按填充尺寸撑大父视图
 - Table 单元格等深层视图不用 `@Environment(AppModel.self)`（排序重建行时会查不到而崩溃），由表格层取出后显式传参（如 `CoverView(store:)`、`PlayingMark(player:)`）
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/跳变/空白） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset`
-- 状态键：`app` `ui` `windows` `library` `player`（含 `queue`） `measure` `nowPlayingInfo` `snapshots` `perf`
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/跳变/空白） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`）
+- 状态键：`app` `ui` `windows`（含 `scrolls` 滚动偏移） `library` `player`（含 `queue`） `lyrics` `measure` `nowPlayingInfo` `snapshots` `perf`
+- 自测模式关闭全部动画（根视图 `.transaction`）：显示器睡眠时动画不推进，带动画的滚动 / 转场会停在第一帧
 - 路径占位：`@out`、`@fixtures`
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
 

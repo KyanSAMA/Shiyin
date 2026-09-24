@@ -118,14 +118,15 @@ public struct PlayQueue: Sendable {
         return true
     }
 
-    /// Reorders upcoming entries (offsets relative to `upcoming`).
-    public mutating func moveUpcoming(from source: IndexSet, to destination: Int) {
+    /// Moves upcoming entries (by id) in front of `target` (nil: to the end). Ids, not offsets, so a list rendered a
+    /// moment ago stays valid after playback advanced.
+    public mutating func moveUpcoming(_ ids: [Int], before target: Int?) {
         let base = (index ?? -1) + 1
         var upcoming = Array(entries[base...])
-        let moving = source.sorted().map { upcoming[$0] }
-        let insertAt = destination - source.filter { $0 < destination }.count
-        upcoming.removeAll { moving.contains($0) }
-        upcoming.insert(contentsOf: moving, at: min(max(insertAt, 0), upcoming.count))
+        let moving = upcoming.filter { ids.contains($0.id) }
+        upcoming.removeAll { ids.contains($0.id) }
+        let insertAt = target.flatMap { t in upcoming.firstIndex { $0.id == t } } ?? upcoming.count
+        upcoming.insert(contentsOf: moving, at: insertAt)
         entries.replaceSubrange(base..., with: upcoming)
         if !shuffled { original = entries }
     }
