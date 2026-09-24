@@ -1,11 +1,13 @@
 import Foundation
 import Observation
+import SwiftUI
 import LocalMusicCore
 
 struct LaunchOptions {
     let selfTestScript: URL?
     let outDir: URL?
     let dataDir: URL?
+    let fixturesDir: URL?
 
     static let current = LaunchOptions(arguments: CommandLine.arguments)
 
@@ -17,6 +19,7 @@ struct LaunchOptions {
         selfTestScript = url(after: "--selftest")
         outDir = url(after: "--out")
         dataDir = url(after: "--data-dir")
+        fixturesDir = url(after: "--fixtures")
     }
 
     var isSelfTest: Bool { selfTestScript != nil }
@@ -48,6 +51,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 @Observable final class UIState {
     var sidebar: SidebarItem = .songs
+    /// Captured from the view environment so non-view code (menus, self-tests) can open Settings.
+    @ObservationIgnored var openSettings: OpenSettingsAction?
 }
 
 @Observable final class AppModel {
@@ -56,7 +61,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     let options: LaunchOptions
     let paths: AppPaths
     let ui = UIState()
-    private(set) var store: LibraryStore?
+    let library: LibraryModel?
     private(set) var startupError: String?
 
     init(options: LaunchOptions) {
@@ -64,9 +69,16 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
         do {
-            store = try LibraryStore(url: paths.database)
+            library = LibraryModel(store: try LibraryStore(url: paths.database))
         } catch {
+            library = nil
             startupError = String(describing: error)
         }
+    }
+
+    /// Self-tests start the library themselves, with their own roots.
+    func startLibrary() async {
+        guard !options.isSelfTest else { return }
+        await library?.start()
     }
 }

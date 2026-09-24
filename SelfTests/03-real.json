@@ -1,0 +1,17 @@
+{
+  "timeout": 120,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "assert", "path": "library.trackCount", "gt": 300 },
+    { "do": "assert", "path": "library.lastScan.failureCount", "equals": 0 },
+    { "do": "assert", "path": "library.lastScan.ms", "lt": 5000 },
+    { "do": "rescan" },
+    { "do": "assert", "path": "library.lastScan.parsed", "equals": 0 },
+    { "do": "assert", "path": "library.lastScan.ms", "lt": 500 },
+    { "do": "snapshot", "name": "songs" },
+    { "do": "openSettings" },
+    { "do": "snapshot", "name": "settings", "window": "settings" },
+    { "do": "state", "name": "end" }
+  ]
+}

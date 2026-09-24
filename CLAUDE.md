@@ -6,8 +6,9 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 构建 / 测试：`swift build`、`swift test`
 - 打包：`Scripts/bundle.sh [debug|release]` → `build/LocalMusic.app`（ad-hoc 签名）
 - 自测：`Scripts/selftest.sh SelfTests/NN-*.json` → `.build/selftest/<name>/`（PNG、`*.state.json`、`report.json`、`app.log`）；退出码 0 通过 / 1 失败 / 2 超时或崩溃
+- 全部自测：`Scripts/run-all-selftests.sh`（结束时用 `find -newer` 证明 `~/Music` 未被写入）；夹具由 `Scripts/make-fixtures.sh` 生成到 `.build/fixtures`（改动时递增 VERSION）
 - 无障碍操作：`Scripts/ax-click.sh <文本>`，对运行中窗口的元素做 AX 选中 / 按下
-- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
+- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`、`lmtool scan <db> [<根目录>...]`；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
 
 ## 硬性约束
 - 只有 Command Line Tools：SwiftUI 宏插件缺失，禁用 `@State` / `@Entry` / `#Preview` / Animatable 宏；状态放 `@Observable` 模型，经 `.environment` 注入，`body` 里用 `@Bindable` 或 `Binding(get:set:)`
@@ -21,8 +22,9 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
 
 ## 自测
-- 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot` `state` `assert` `waitUntil`
+- 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings`
+- 路径占位：`@out`、`@fixtures`
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
 
 ## Spike 结论（第 1 步）

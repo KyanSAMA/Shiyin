@@ -9,6 +9,7 @@ cd "$(dirname "$0")/.."
 NAME=$(basename "$SCRIPT" .json)
 OUT=.build/selftest/$NAME
 
+Scripts/make-fixtures.sh || exit 2
 [ "${SKIP_BUNDLE:-0}" = 1 ] || Scripts/bundle.sh debug >/dev/null || exit 2
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -16,7 +17,7 @@ mkdir -p "$OUT"
 # Outer guard in case the in-app watchdog never fires.
 perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' 600 \
   build/LocalMusic.app/Contents/MacOS/LocalMusic \
-  --selftest "$SCRIPT" --out "$OUT" --data-dir "$OUT/data" \
+  --selftest "$SCRIPT" --out "$OUT" --data-dir "$OUT/data" --fixtures .build/fixtures \
   -ApplePersistenceIgnoreState YES > "$OUT/app.log" 2>&1
 CODE=$?
 [ $CODE -gt 2 ] && CODE=2

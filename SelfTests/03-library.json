@@ -1,0 +1,24 @@
+{
+  "timeout": 90,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "assert", "path": "library.trackCount", "equals": 9 },
+    { "do": "assert", "path": "library.lastScan.failureCount", "equals": 0 },
+    { "do": "assert", "path": "library.albumCount", "equals": 6 },
+    { "do": "assert", "path": "library.artistCount", "equals": 9 },
+    { "do": "assert", "path": "library.composerCount", "equals": 3 },
+    { "do": "snapshot", "name": "songs" },
+    { "do": "fs", "op": "copy", "from": "@fixtures/extra/新歌.flac", "to": "@out/lib/新歌.flac" },
+    { "do": "waitUntil", "path": "library.trackCount", "equals": 10, "timeout": 10 },
+    { "do": "assert", "path": "library.firstSongs", "contains": "新歌" },
+    { "do": "fs", "op": "remove", "path": "@out/lib/新歌.flac" },
+    { "do": "waitUntil", "path": "library.trackCount", "equals": 9, "timeout": 10 },
+    { "do": "rescan" },
+    { "do": "assert", "path": "library.lastScan.parsed", "equals": 0 },
+    { "do": "openSettings" },
+    { "do": "snapshot", "name": "settings", "window": "settings" },
+    { "do": "state", "name": "end" }
+  ]
+}

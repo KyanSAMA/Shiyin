@@ -116,6 +116,7 @@ public final class Database {
             throw SQLiteError(code: rc, message: message)
         }
         handle = h
+        sqlite3_busy_timeout(h, 5000)
         try execute("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA synchronous=NORMAL;")
     }
 

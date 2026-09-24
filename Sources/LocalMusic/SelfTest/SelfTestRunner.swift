@@ -88,7 +88,19 @@ final class SelfTestRunner {
             try window().makeKeyAndOrderFront(nil)
             try await settle()
         case "snapshot":
-            try await snapshot(try step.required("name"))
+            try await snapshot(try step.required("name"), window: try window(step.string("window") ?? "main"))
+        case "startLibrary":
+            let include = (step["include"] as? [String])?.map(resolve), exclude = (step["exclude"] as? [String])?.map(resolve)
+            try await library().start(roots: include.map { LibraryRoots(include: $0, exclude: exclude ?? []) })
+        case "rescan":
+            try await library().scan()
+        case "fs":
+            try fileOperation(step)
+        case "openSettings":
+            model.ui.openSettings?()
+            let deadline = Date().addingTimeInterval(5)
+            while (try? window("settings")) == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
+            try await settle()
         case "state":
             try write(state(), to: nextFile(try step.required("name"), "state.json"))
         case "assert":
@@ -97,6 +109,38 @@ final class SelfTestRunner {
             try await waitUntil(step)
         default:
             throw SelfTestFailure(description: "unknown action")
+        }
+    }
+
+    private func library() throws -> LibraryModel {
+        guard let library = model.library else { throw SelfTestFailure(description: "library unavailable: \(model.startupError ?? "")") }
+        return library
+    }
+
+    /// `@out` / `@fixtures` placeholders in script paths.
+    private func resolve(_ path: String) -> String {
+        path.replacingOccurrences(of: "@out", with: out.path)
+            .replacingOccurrences(of: "@fixtures", with: model.options.fixturesDir?.path ?? "@fixtures")
+    }
+
+    /// Copies (anything readable) or removes, but only ever writes strictly inside `--out`; canonical paths resolve
+    /// symlinks, so neither `..` nor a symlinked component can escape.
+    private func fileOperation(_ step: Step) throws {
+        let op = try step.required("op")
+        let target = URL(filePath: resolve(try step.required(op == "remove" ? "path" : "to"))).standardizedFileURL
+        guard canonicalPath(target.path).hasPrefix(canonicalPath(out.path) + "/") else {
+            throw SelfTestFailure(description: "fs target \(target.path) is outside --out")
+        }
+        let fm = FileManager.default
+        switch op {
+        case "copy":
+            try? fm.removeItem(at: target)
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.copyItem(at: URL(filePath: resolve(try step.required("from"))), to: target)
+        case "remove":
+            try fm.removeItem(at: target)
+        default:
+            throw SelfTestFailure(description: "unknown fs op \(op)")
         }
     }
 
@@ -139,15 +183,17 @@ final class SelfTestRunner {
             ?? NSApp.windows.first { $0.isVisible && !($0 is NSPanel) }
     }
 
-    private func window() throws -> NSWindow {
-        guard let window = mainWindow else { throw SelfTestFailure(description: "main window not found") }
+    private func window(_ name: String = "main") throws -> NSWindow {
+        let window = name == "main" ? mainWindow : NSApp.windows.first {
+            $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || $0.title.contains("设置"))
+        }
+        guard let window else { throw SelfTestFailure(description: "\(name) window not found") }
         return window
     }
 
     /// Prefers a window-server capture (faithful, incl. Liquid Glass sidebar; needs the terminal's Screen Recording
     /// grant). Falls back to an in-process `cacheDisplay` render, which omits system materials.
-    private func snapshot(_ name: String) async throws {
-        let window = try window()
+    private func snapshot(_ name: String, window: NSWindow) async throws {
         let url = nextFile(name, "png")
         let method: String
         if try await screencapture(window, to: url) {
@@ -195,11 +241,27 @@ final class SelfTestRunner {
         } ?? NSNull()
         return [
             "app": ["dataDir": model.paths.data.path, "startupError": model.startupError as Any? ?? NSNull(),
-                    "storeOpen": model.store != nil, "isActive": NSApp.isActive],
+                    "storeOpen": model.library != nil, "isActive": NSApp.isActive],
             "ui": ["sidebar": model.ui.sidebar.rawValue],
             "windows": ["main": main],
+            "library": model.library.map(libraryState) ?? NSNull(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],
+        ]
+    }
+
+    private func libraryState(_ library: LibraryModel) -> Step {
+        let index = library.index
+        return [
+            "started": library.started, "scanning": library.scanning, "lastError": library.lastError as Any? ?? NSNull(),
+            "trackCount": index.songs.count, "albumCount": index.albums.count,
+            "artistCount": index.artists.count, "composerCount": index.composers.count,
+            "firstSongs": index.songs.prefix(5).map(\.title),
+            "roots": ["include": library.roots.include, "exclude": library.roots.exclude],
+            "lastScan": library.lastScan.map {
+                ["total": $0.total, "parsed": $0.parsed, "added": $0.added, "updated": $0.updated, "removed": $0.removed,
+                 "failureCount": $0.failures.count, "ms": $0.milliseconds] as Step
+            } ?? NSNull(),
         ]
     }
 

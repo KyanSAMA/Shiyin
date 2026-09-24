@@ -4,6 +4,7 @@ import LocalMusicCore
 // Developer CLI: dumps what LocalMusicCore parses, as JSON, for validation scripts.
 //   lmtool tags [--stats] [--sha] <file|dir>...
 //   lmtool lrc <audio-file|.lrc>
+//   lmtool scan <db> [<root>...]      (default roots: the system Music folder minus its Apple Music library)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -100,13 +101,27 @@ func lrc(_ path: String) async throws {
     }
 }
 
+func scan(_ database: String, _ roots: [String]) async throws {
+    let store = try LibraryStore(url: URL(filePath: database))
+    let roots = roots.isEmpty ? .defaults : LibraryRoots(include: roots, exclude: [])
+    let first = try await LibraryScanner.scan(store: store, roots: roots)
+    let second = try await LibraryScanner.scan(store: store, roots: roots)
+    let index = LibraryIndex(rows: try await store.rows())
+    emit(["first": ["total": first.total, "parsed": first.parsed, "failures": first.failures, "ms": first.milliseconds],
+          "second": ["parsed": second.parsed, "ms": second.milliseconds],
+          "songs": index.songs.count, "albums": index.albums.count, "artists": index.artists.count, "composers": index.composers.count,
+          "albumList": index.albums.map { "\($0.title) — \($0.artist) (\($0.trackIDs.count))" }])
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
 case "lrc" where arguments.count == 2:
     try await lrc(arguments[1])
+case "scan" where arguments.count >= 2:
+    try await scan(arguments[1], Array(arguments.dropFirst(2)))
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file>\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...]\n".utf8))
     exit(64)
 }

@@ -11,6 +11,11 @@ struct LocalMusicApp: App {
                 .environment(AppModel.shared)
         }
         .defaultSize(width: 1200, height: 760)
+
+        Settings {
+            SettingsView()
+                .environment(AppModel.shared)
+        }
     }
 }
 
