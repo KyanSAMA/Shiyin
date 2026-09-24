@@ -66,21 +66,52 @@ enum Route: Hashable {
     /// transition would stay at its first frame.
     var animationsEnabled = true
     var queueShown = false
+    var filter = TrackFilter()
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
-    @ObservationIgnored private var filteredMemo: (index: UUID, search: String, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
+    @ObservationIgnored private var filteredMemo: (index: UUID, search: String, filter: TrackFilter, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
+    @ObservationIgnored private var matchesMemo: (index: UUID, filter: TrackFilter, ids: Set<Int64>?)?
 
-    /// Library songs sorted like the table (memoized per sort) then filtered by the search field (memoized per query),
-    /// so typing never re-sorts.
+    /// Library songs sorted like the table (memoized per sort) then narrowed by the search field and filter (memoized
+    /// per query), so typing never re-sorts.
     func songs(in index: LibraryIndex) -> [TrackRow] {
-        let search = search, sort = songSort
-        if let memo = filteredMemo, memo.index == index.id, memo.search == search, memo.sort == sort { return memo.rows }
+        let search = search, filter = filter, sort = songSort
+        if let memo = filteredMemo, memo.index == index.id, memo.search == search, memo.filter == filter, memo.sort == sort {
+            return memo.rows
+        }
         if sortedMemo?.index != index.id || sortedMemo?.sort != sort {
             sortedMemo = (index.id, sort, index.songs.sorted(using: sort))
         }
-        let rows = index.filter(sortedMemo!.rows, matching: search)
-        filteredMemo = (index.id, search, sort, rows)
+        var rows = index.filter(sortedMemo!.rows, matching: search)
+        if let ids = matches(in: index) { rows.removeAll { !ids.contains($0.id) } }
+        filteredMemo = (index.id, search, filter, sort, rows)
         return rows
     }
+
+    /// Albums and people with at least one track the filter keeps.
+    func albums(in index: LibraryIndex) -> [AlbumGroup] {
+        let albums = index.albums(matching: search)
+        guard let ids = matches(in: index) else { return albums }
+        return albums.filter { $0.trackIDs.contains(where: ids.contains) }
+    }
+
+    func people(_ role: PersonRole, in index: LibraryIndex) -> [PersonGroup] {
+        let groups = index.people(role, matching: search)
+        guard let ids = matches(in: index) else { return groups }
+        return groups.filter { $0.trackIDs.contains(where: ids.contains) }
+    }
+
+    private func matches(in index: LibraryIndex) -> Set<Int64>? {
+        let filter = filter
+        if let memo = matchesMemo, memo.index == index.id, memo.filter == filter { return memo.ids }
+        let ids = index.matches(filter)
+        matchesMemo = (index.id, filter, ids)
+        return ids
+    }
+
+    /// Lists are rebuilt rather than diffed when this changes: far cheaper than SwiftUI diffing hundreds of reinserted
+    /// rows (2.5 s to clear a search over 322 songs).
+    var listID: [AnyHashable] { [search, filter] }
+
     /// Captured from the view environment so non-view code (menus, self-tests) can open Settings.
     @ObservationIgnored var openSettings: OpenSettingsAction?
 }

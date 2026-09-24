@@ -32,6 +32,7 @@ public struct LibraryIndex: Sendable {
     public let artists: [PersonGroup]
     public let composers: [PersonGroup]
     public let tracks: [Int64: TrackRow]
+    public let facets: Facets
     private let searchKeys: [Int64: String]
     private let albumOfTrack: [Int64: Int]
 
@@ -42,6 +43,7 @@ public struct LibraryIndex: Sendable {
         albumOfTrack = Dictionary(uniqueKeysWithValues: albums.enumerated().flatMap { i, album in album.trackIDs.map { ($0, i) } })
         artists = Self.people(songs, \.artists)
         composers = Self.people(songs, \.composers)
+        facets = Facets(songs: songs, albums: albums)
         searchKeys = Dictionary(uniqueKeysWithValues: rows.map {
             ($0.id, Self.searchFold(([$0.title, $0.albumTitle] + $0.artists + $0.composers).joined(separator: "\u{1}")))
         })

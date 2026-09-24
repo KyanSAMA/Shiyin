@@ -71,17 +71,27 @@ struct DetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let item = model.ui.sidebar
+        let ui = model.ui
         if let library = model.library, !library.index.songs.isEmpty {
-            let index = library.index, search = model.ui.search
-            switch item {
-            // `.id(search)`: rebuilding is far cheaper than SwiftUI diffing hundreds of reinserted rows (2.5 s to clear a
-            // search over 322 songs).
-            case .songs: SongsTable(rows: model.ui.songs(in: index)).id(search)
-            case .albums: AlbumsGrid(albums: index.albums(matching: search), index: index)
-            case .artists: PeopleList(groups: index.people(.artist, matching: search), role: .artist).id(search)
-            case .composers: PeopleList(groups: index.people(.composer, matching: search), role: .composer).id(search)
+            let index = library.index
+            VStack(spacing: 0) {
+                if !ui.filter.isEmpty {
+                    FilterBar(ui: ui)
+                    Divider()
+                }
+                switch ui.sidebar {
+                case .songs:
+                    let rows = ui.songs(in: index)
+                    Results(ui: ui, isEmpty: rows.isEmpty) { SongsTable(rows: rows).id(ui.listID) }
+                case .albums:
+                    let albums = ui.albums(in: index)
+                    Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index) }
+                case .artists, .composers:
+                    let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
+                    Results(ui: ui, isEmpty: groups.isEmpty) { PeopleList(groups: groups, role: role).id(ui.listID) }
+                }
             }
+            .toolbar { FilterMenu(ui: ui, facets: index.facets) }
         } else if let library = model.library, library.scanning || !library.started {
             ProgressView("正在扫描曲库…")
         } else {
@@ -92,6 +102,29 @@ struct DetailView: View {
             } actions: {
                 SettingsLink { Text("打开设置") }
             }
+        }
+    }
+}
+
+/// Stands in for a list the search or filter left empty.
+private struct Results<Content: View>: View {
+    let ui: UIState
+    let isEmpty: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if isEmpty {
+            ContentUnavailableView {
+                Label("没有结果", systemImage: "magnifyingglass")
+            } description: {
+                let search = ui.search.trimmingCharacters(in: .whitespaces)
+                Text(search.isEmpty ? "没有符合筛选条件的内容" : "没有与“\(search)”匹配的内容")
+            } actions: {
+                if !ui.filter.isEmpty { Button("清除筛选") { ui.filter = TrackFilter() } }
+            }
+            .frame(maxHeight: .infinity)
+        } else {
+            content
         }
     }
 }

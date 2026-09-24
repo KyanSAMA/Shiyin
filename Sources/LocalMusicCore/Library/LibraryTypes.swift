@@ -40,6 +40,7 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public let genre: String?
     public let duration: Double
     public let format: String
+    public let codec: String?
     public let sampleRate: Int?
     public let bitDepth: Int?
     public let hasCover: Bool

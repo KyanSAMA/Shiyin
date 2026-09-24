@@ -173,7 +173,7 @@ struct LibraryIndexTests {
     private func row(_ id: Int64, _ title: String, album: String? = nil, albumArtist: String? = nil, artists: [String] = [],
                      composers: [String] = [], dir: String = "/lib", track: Int? = nil) -> TrackRow {
         TrackRow(id: id, path: "\(dir)/\(title).flac", title: title, album: album, albumArtist: albumArtist, artists: artists,
-                 composers: composers, trackNo: track, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac",
+                 composers: composers, trackNo: track, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac", codec: "flac",
                  sampleRate: 44100, bitDepth: 16, hasCover: id % 2 == 0, coverOffset: nil, coverLength: nil, hasLyrics: false,
                  addedAt: .now, fileMtime: 0)
     }

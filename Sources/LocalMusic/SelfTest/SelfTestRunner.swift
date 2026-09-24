@@ -90,6 +90,24 @@ final class SelfTestRunner {
         case "search":
             model.ui.search = step.string("value") ?? ""
             try await settle()
+        case "filter":
+            if let unknown = step.keys.first(where: { !["do", "albumArtists", "years", "genres", "formats", "hiRes", "hasLyrics"].contains($0) }) {
+                throw SelfTestFailure(description: "unknown filter key \(unknown)")
+            }
+            func typed<T>(_ key: String) throws -> T? {
+                guard let raw = step[key] else { return nil }
+                guard let value = raw as? T else { throw SelfTestFailure(description: "bad \(key): \(raw)") }
+                return value
+            }
+            var filter = TrackFilter()
+            filter.albumArtists = Set(try typed("albumArtists") ?? [String]())
+            filter.years = Set(try typed("years") ?? [Int]())
+            filter.genres = Set(try typed("genres") ?? [String]())
+            filter.formats = Set(try typed("formats") ?? [String]())
+            filter.hiRes = try typed("hiRes")
+            filter.hasLyrics = try typed("hasLyrics")
+            model.ui.filter = filter
+            try await settle()
         case "sort":
             model.ui.songSort = [try comparator(step.required("column"), ascending: step["ascending"] as? Bool ?? true)]
             try await settle()
@@ -241,9 +259,9 @@ final class SelfTestRunner {
         case nil:
             switch ui.sidebar {
             case .songs: return ui.songs(in: index).map(\.title)
-            case .albums: return index.albums(matching: ui.search).map(\.title)
-            case .artists: return index.people(.artist, matching: ui.search).map(\.name)
-            case .composers: return index.people(.composer, matching: ui.search).map(\.name)
+            case .albums: return ui.albums(in: index).map(\.title)
+            case .artists: return ui.people(.artist, in: index).map(\.name)
+            case .composers: return ui.people(.composer, in: index).map(\.name)
             }
         }
     }
@@ -403,6 +421,7 @@ final class SelfTestRunner {
             "app": ["dataDir": model.paths.data.path, "startupError": model.startupError as Any? ?? NSNull(),
                     "storeOpen": model.library != nil, "isActive": NSApp.isActive],
             "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
+                   "filterChips": model.ui.filter.chips.map { [$0.dimension, $0.value].compactMap { $0 }.joined(separator: " ") },
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
             "windows": ["main": main, "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 private func row(_ id: Int64, _ title: String, album: String? = nil, artists: [String] = [], composers: [String] = [],
                  path: String? = nil, cover: (Int64, Int)? = nil, mtime: Double = 1) -> TrackRow {
     TrackRow(id: id, path: path ?? "/lib/\(id).flac", title: title, album: album, albumArtist: nil, artists: artists,
-             composers: composers, trackNo: path.flatMap { Int(URL(filePath: $0).deletingPathExtension().lastPathComponent) }, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac",
+             composers: composers, trackNo: path.flatMap { Int(URL(filePath: $0).deletingPathExtension().lastPathComponent) }, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac", codec: "flac",
              sampleRate: 44100, bitDepth: 16, hasCover: cover != nil, coverOffset: cover?.0, coverLength: cover?.1,
              hasLyrics: false, addedAt: .now, fileMtime: mtime)
 }
@@ -115,7 +115,7 @@ struct ArtworkTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let good = try track(8, image: try png(width: 100, height: 100))
         let stale = TrackRow(id: 9, path: good.path, title: "x", album: nil, albumArtist: nil, artists: [], composers: [],
-                             trackNo: nil, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac", sampleRate: nil,
+                             trackNo: nil, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac", codec: "flac", sampleRate: nil,
                              bitDepth: nil, hasCover: true, coverOffset: 0, coverLength: 16, hasLyrics: false, addedAt: .now, fileMtime: 1)
         try png(width: 40, height: 40).write(to: dir.appending(path: "folder.png"))
         #expect(await ArtworkCache(directory: dir.appending(path: "cache")).image(for: stale, pixels: 64)?.width == 40)
@@ -170,5 +170,58 @@ struct LyricsSourceTests {
         try Data("[00:02.00]sidecar".utf8).write(to: dir.appending(path: "a.lrc"))
         _ = try await LibraryScanner.scan(store: store, roots: roots)
         #expect(try await store.lyrics(for: id) == .synced([LyricLine(time: 2, text: "sidecar")]))
+    }
+}
+
+struct FilterTests {
+    private static func row(_ id: Int64, album: String?, albumArtist: String?, artist: String? = nil, year: Int? = nil,
+                            genre: String? = nil, format: String = "flac", codec: String? = "flac", rate: Int = 44100,
+                            bits: Int? = 16, lyrics: Bool = false) -> TrackRow {
+        TrackRow(id: id, path: "/lib/\(album ?? "")/\(id).\(format)", title: "\(id)", album: album, albumArtist: albumArtist,
+                 artists: [artist ?? albumArtist].compactMap { $0 }, composers: [], trackNo: nil, discNo: nil, year: year, genre: genre, duration: 1,
+                 format: format, codec: codec, sampleRate: rate, bitDepth: bits, hasCover: false, coverOffset: nil,
+                 coverLength: nil, hasLyrics: lyrics, addedAt: .now, fileMtime: 0)
+    }
+
+    private let index = LibraryIndex(rows: [
+        row(1, album: "A", albumArtist: "YOASOBI", year: 2021, genre: "J-Pop", rate: 96000, bits: 24, lyrics: true),
+        row(2, album: "A", albumArtist: "YOASOBI", year: 2021),
+        row(3, album: "B", albumArtist: "Aimer", year: 2019, genre: "New Wave, J-Pop", format: "m4a", codec: "alac", rate: 48000, bits: 24),
+        row(4, album: "C", albumArtist: "Aimer", format: "m4a", codec: "aac", rate: 96000, bits: nil, lyrics: true),
+        row(5, album: "D", albumArtist: "miwa", year: 2019, format: "mp3", codec: "mp3", rate: 48000, bits: nil),
+        row(6, album: "D", albumArtist: "miwa", format: "wav", codec: "pcm", rate: 48000, bits: 16),
+        row(7, album: nil, albumArtist: nil, artist: "Aimer", genre: "j-pop", format: "m4a", codec: nil),
+    ])
+
+    private func ids(_ build: (inout TrackFilter) -> Void) -> [Int64]? {
+        var filter = TrackFilter()
+        build(&filter)
+        return index.matches(filter)?.sorted()
+    }
+
+    @Test func combinesDimensionsWithAndValuesWithOr() {
+        #expect(ids { _ in } == nil)
+        #expect(ids { $0.formats = ["FLAC", "WAV"] } == [1, 2, 6])
+        #expect(ids { $0.years = [2019, 2021] } == [1, 2, 3, 5])
+        #expect(ids { $0.years = [2019]; $0.albumArtists = ["Aimer"] } == [3])
+        // Folded like search; an untitled track's album artist is its group's (majority) artist.
+        #expect(ids { $0.genres = ["J-POP"] } == [1, 3, 7])
+        #expect(ids { $0.albumArtists = ["aimer"] } == [3, 4, 7])
+        #expect(ids { $0.hasLyrics = false; $0.albumArtists = ["YOASOBI", "Aimer"] } == [2, 3, 7])
+        #expect(ids { $0.years = [1999] } == [])
+    }
+
+    /// Lossless and above 48 kHz or at least 24 bit; a 96 kHz AAC is not Hi-Res.
+    @Test func hiResNeedsLosslessBeyondCD() {
+        #expect(ids { $0.hiRes = true } == [1, 3])
+        #expect(ids { $0.hiRes = false } == [2, 4, 5, 6, 7])
+    }
+
+    @Test func offersEveryValueOnce() {
+        let facets = index.facets
+        #expect(facets.albumArtists == ["Aimer", "miwa", "YOASOBI"])
+        #expect(facets.years == [2021, 2019])
+        #expect(facets.genres == ["J-Pop", "New Wave"])
+        #expect(facets.formats == ["AAC", "ALAC", "FLAC", "M4A", "MP3", "WAV"])
     }
 }
