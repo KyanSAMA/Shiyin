@@ -33,9 +33,15 @@ import LocalMusicCore
 
     // MARK: Commands
 
-    func play(_ tracks: [Int64], startAt index: Int) {
-        queue.replace(with: tracks, start: index, using: &rng)
+    /// `shuffle: nil` keeps the current shuffle mode (double-click in a list); the explicit 播放 / 随机播放 buttons set it.
+    func play(_ tracks: [Int64], startAt index: Int, shuffle: Bool? = nil) {
+        queue.replace(with: tracks, start: index, shuffle: shuffle, using: &rng)
         startCurrent()
+    }
+
+    func shufflePlay(_ tracks: [Int64]) {
+        guard !tracks.isEmpty else { return }
+        play(tracks, startAt: Int.random(in: tracks.indices, using: &rng), shuffle: true)
     }
 
     func togglePlayPause() {

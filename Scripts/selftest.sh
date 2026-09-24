@@ -30,8 +30,12 @@ import json, sys
 r = json.load(open(sys.argv[1]))
 print("status:", r.get("status"), "| duration: %.1fs" % r.get("durationSec", 0))
 if r.get("error"): print("error:", r["error"])
-for name, s in sorted(r.get("snapshots", {}).items()):
+snaps = r.get("snapshots", {})
+for name, s in sorted(snaps.items()):
     print(f"  {name}: {s.get('file')} {s.get('method')} blank={s.get('isLikelyBlank')} colors={s.get('uniqueColors')}")
+rendered = [n for n, s in snaps.items() if s.get("method") == "render"]
+if rendered:
+    print(f"  WARNING: {len(rendered)} snapshot(s) fell back to in-app render (display asleep/locked or no Screen Recording grant); system materials are missing")
 PY
 else
   echo "no report.json; see $OUT/app.log"

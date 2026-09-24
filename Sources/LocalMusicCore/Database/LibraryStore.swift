@@ -132,7 +132,7 @@ public actor LibraryStore {
         }
         return try db.query("""
             SELECT id, path, title, album, album_artist, track_no, disc_no, year, genre, duration, format, sample_rate,
-                   bit_depth, has_cover, has_lyrics, added_at, file_mtime
+                   bit_depth, has_cover, has_lyrics, added_at, file_mtime, cover_offset, cover_length
             FROM track WHERE scan_error IS NULL
             """) { r in
             let id = r.int64(0)!
@@ -140,7 +140,7 @@ public actor LibraryStore {
                             artists: people[id]?.artists ?? [], composers: people[id]?.composers ?? [],
                             trackNo: r.int(5), discNo: r.int(6), year: r.int(7), genre: r.string(8), duration: r.double(9) ?? 0,
                             format: r.string(10) ?? "", sampleRate: r.int(11), bitDepth: r.int(12),
-                            hasCover: r.int(13) == 1, hasLyrics: r.int(14) == 1,
+                            hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18), hasLyrics: r.int(14) == 1,
                             addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0), fileMtime: r.double(16) ?? 0)
         }
     }

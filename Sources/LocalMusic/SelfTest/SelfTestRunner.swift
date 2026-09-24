@@ -84,7 +84,35 @@ final class SelfTestRunner {
             let value = try step.required("value")
             guard let item = SidebarItem(rawValue: value) else { throw SelfTestFailure(description: "unknown sidebar \(value)") }
             model.ui.sidebar = item
+            model.ui.path = []
             try await settle()
+        case "search":
+            model.ui.search = step.string("value") ?? ""
+            try await settle()
+        case "sort":
+            model.ui.songSort = [try comparator(step.required("column"), ascending: step["ascending"] as? Bool ?? true)]
+            try await settle()
+        case "openAlbum":
+            let title = try step.required("title")
+            guard let album = try library().index.albums.first(where: { $0.title == title }) else {
+                throw SelfTestFailure(description: "no album \(title)")
+            }
+            model.ui.path = [.album(album.id)]
+            try await settle()
+        case "openPerson":
+            let name = try step.required("name"), role: PersonRole = step.string("role") == "composer" ? .composer : .artist
+            guard let group = try library().index.people(role).first(where: { $0.name == name }) else {
+                throw SelfTestFailure(description: "no \(role) \(name)")
+            }
+            model.ui.path = [.person(role, group.id)]
+            try await settle()
+        case "back":
+            _ = model.ui.path.popLast()
+            try await settle()
+        case "scrollList":
+            try await scrollList(steps: Int(step.number("steps") ?? 30), interval: step.number("interval") ?? 0.06)
+        case "perfReset":
+            stalls.reset()
         case "activate":
             NSApp.activate()
             try window().makeKeyAndOrderFront(nil)
@@ -141,6 +169,55 @@ final class SelfTestRunner {
             try await waitUntil(step)
         default:
             throw SelfTestFailure(description: "unknown action")
+        }
+    }
+
+    private func comparator(_ column: String, ascending: Bool) throws -> KeyPathComparator<TrackRow> {
+        let order: SortOrder = ascending ? .forward : .reverse
+        switch column {
+        case "title": return KeyPathComparator(\.title, comparator: .localizedStandard, order: order)
+        case "artist": return KeyPathComparator(\.artistText, comparator: .localizedStandard, order: order)
+        case "album": return KeyPathComparator(\.albumTitle, comparator: .localizedStandard, order: order)
+        case "year": return KeyPathComparator(\.yearSortKey, order: order)
+        case "duration": return KeyPathComparator(\.duration, order: order)
+        case "added": return KeyPathComparator(\.addedAt, order: order)
+        default: throw SelfTestFailure(description: "unknown column \(column)")
+        }
+    }
+
+    /// Scrolls the tallest scroll view in the main window from top to bottom, like a user flicking through;
+    /// `steps: 0` only jumps back to the top.
+    private func scrollList(steps: Int, interval: Double) async throws {
+        func scrollViews(_ view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? view.subviews.flatMap(scrollViews)
+        }
+        guard let root = try window().contentView,
+              let scroll = scrollViews(root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) })
+        else { throw SelfTestFailure(description: "no scroll view") }
+        for i in 0...steps {
+            let maxY = max((scroll.documentView?.frame.height ?? 0) - scroll.contentView.bounds.height, 0)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: steps == 0 ? 0 : maxY * Double(i) / Double(steps)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            try await Task.sleep(for: .seconds(interval))
+        }
+    }
+
+    /// Titles or names the current page shows, in display order.
+    private func visibleTitles() -> [String] {
+        guard let index = model.library?.index else { return [] }
+        let ui = model.ui
+        switch ui.path.last {
+        case .album(let id)?:
+            return index.album(id)?.trackIDs.compactMap { index.tracks[$0]?.title } ?? []
+        case .person(let role, let id)?:
+            return index.person(role, id)?.trackIDs.compactMap { index.tracks[$0] }.sorted(using: ui.songSort).map(\.title) ?? []
+        case nil:
+            switch ui.sidebar {
+            case .songs: return ui.songs(in: index).map(\.title)
+            case .albums: return index.albums(matching: ui.search).map(\.title)
+            case .artists: return index.people(.artist, matching: ui.search).map(\.name)
+            case .composers: return index.people(.composer, matching: ui.search).map(\.name)
+            }
         }
     }
 
@@ -258,15 +335,20 @@ final class SelfTestRunner {
         snapshots[name] = stats.json.merging(["file": url.lastPathComponent, "method": method]) { $1 }
     }
 
+    /// Retries briefly: right after launch the window server may not know the window yet.
     private func screencapture(_ window: NSWindow, to url: URL) async throws -> Bool {
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-o", "-l\(window.windowNumber)", url.path]
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
-            process.terminationHandler = { _ in done.resume() }
-            do { try process.run() } catch { done.resume(throwing: error) }
+        for attempt in 0..<3 {
+            if attempt > 0 { try await Task.sleep(for: .milliseconds(300)) }
+            let process = Process()
+            process.executableURL = URL(filePath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l\(window.windowNumber)", url.path]
+            try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+                process.terminationHandler = { _ in done.resume() }
+                do { try process.run() } catch { done.resume(throwing: error) }
+            }
+            if process.terminationStatus == 0, FileManager.default.fileExists(atPath: url.path) { return true }
         }
-        return process.terminationStatus == 0 && FileManager.default.fileExists(atPath: url.path)
+        return false
     }
 
     private func render(_ window: NSWindow, to url: URL) throws {
@@ -285,6 +367,7 @@ final class SelfTestRunner {
 
     private func state() -> Step {
         let perf = stalls.current
+        let visible = visibleTitles()
         let main: Any = mainWindow.map {
             ["number": $0.windowNumber, "visible": $0.isVisible, "alpha": $0.alphaValue,
              "width": $0.frame.width, "height": $0.frame.height] as Step
@@ -292,7 +375,8 @@ final class SelfTestRunner {
         return [
             "app": ["dataDir": model.paths.data.path, "startupError": model.startupError as Any? ?? NSNull(),
                     "storeOpen": model.library != nil, "isActive": NSApp.isActive],
-            "ui": ["sidebar": model.ui.sidebar.rawValue],
+            "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
+                   "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
             "windows": ["main": main],
             "library": model.library.map(libraryState) ?? NSNull(),
             "player": model.player.map(playerState) ?? NSNull(),

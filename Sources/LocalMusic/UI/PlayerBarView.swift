@@ -7,7 +7,7 @@ struct PlayerBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             if let player = model.player {
-                NowPlayingSummary(player: player)
+                NowPlayingSummary(player: player, artwork: model.artwork)
                     .frame(width: 260, alignment: .leading)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
@@ -28,13 +28,11 @@ struct PlayerBarView: View {
 
 private struct NowPlayingSummary: View {
     let player: PlayerModel
+    let artwork: ArtworkStore
 
     var body: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.quaternary)
-                .frame(width: 48, height: 48)
-                .overlay { Image(systemName: "music.note").foregroundStyle(.secondary) }
+            CoverView(store: artwork, row: player.current, size: 48, radius: 6)
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.current?.title ?? "未在播放")
                     .font(.system(size: 13, weight: .semibold))

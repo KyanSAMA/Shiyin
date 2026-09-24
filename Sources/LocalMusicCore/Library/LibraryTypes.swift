@@ -43,12 +43,18 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public let sampleRate: Int?
     public let bitDepth: Int?
     public let hasCover: Bool
+    public let coverOffset: Int64?
+    public let coverLength: Int?
     public let hasLyrics: Bool
     public let addedAt: Date
     public let fileMtime: Double
 
     public var url: URL { URL(filePath: path) }
     public var artistText: String { artists.joined(separator: " / ") }
+
+    // Non-optional sort keys for table columns.
+    public var albumTitle: String { album ?? "" }
+    public var yearSortKey: Int { year ?? 0 }
 }
 
 public struct ScanReport: Sendable {

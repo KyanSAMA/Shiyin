@@ -32,6 +32,7 @@ public final class StallMonitor: Sendable {
     }
 
     public func stop() { running.store(false, ordering: .relaxed) }
+    public func reset() { stats.withLock { $0 = Stats() } }
     public var current: Stats { stats.withLock { $0 } }
 }
 

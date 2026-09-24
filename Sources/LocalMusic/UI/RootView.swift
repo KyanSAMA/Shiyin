@@ -6,12 +6,17 @@ struct RootView: View {
     @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        @Bindable var ui = model.ui
         VStack(spacing: 0) {
             NavigationSplitView {
                 SidebarView()
             } detail: {
-                DetailView()
+                NavigationStack(path: $ui.path) {
+                    DetailView()
+                        .navigationDestination(for: Route.self) { RouteView(route: $0) }
+                }
             }
+            .searchable(text: $ui.search, placement: .toolbar, prompt: "搜索")
             Divider()
             PlayerBarView()
         }
@@ -28,10 +33,17 @@ struct SidebarView: View {
 
     var body: some View {
         let ui = model.ui
-        List(selection: Binding(get: { ui.sidebar }, set: { if let item = $0 { ui.sidebar = item } })) {
+        List(selection: Binding(get: { ui.sidebar }, set: { item in
+            guard let item else { return }
+            ui.sidebar = item
+            ui.path = []
+        })) {
             Section("资料库") {
                 ForEach(SidebarItem.allCases) { item in
-                    Label(item.title, systemImage: item.symbol).tag(item)
+                    Label(item.title, systemImage: item.symbol)
+                        .tag(item)
+                        // Re-clicking the selected item doesn't reach the selection setter; still pop to its root.
+                        .simultaneousGesture(TapGesture().onEnded { if ui.sidebar == item { ui.path = [] } })
                 }
             }
         }
@@ -45,10 +57,14 @@ struct DetailView: View {
     var body: some View {
         let item = model.ui.sidebar
         if let library = model.library, !library.index.songs.isEmpty {
+            let index = library.index, search = model.ui.search
             switch item {
-            case .songs: SongsTableView(songs: library.index.songs)
-            case .albums, .artists, .composers:
-                ContentUnavailableView(item.title, systemImage: item.symbol, description: Text("浏览视图开发中"))
+            // `.id(search)`: rebuilding is far cheaper than SwiftUI diffing hundreds of reinserted rows (2.5 s to clear a
+            // search over 322 songs).
+            case .songs: SongsTable(rows: model.ui.songs(in: index)).id(search)
+            case .albums: AlbumsGrid(albums: index.albums(matching: search), index: index)
+            case .artists: PeopleList(groups: index.people(.artist, matching: search), role: .artist).id(search)
+            case .composers: PeopleList(groups: index.people(.composer, matching: search), role: .composer).id(search)
             }
         } else if let library = model.library, library.scanning || !library.started {
             ProgressView("正在扫描曲库…")
@@ -64,37 +80,25 @@ struct DetailView: View {
     }
 }
 
-struct SongsTableView: View {
+struct RouteView: View {
     @Environment(AppModel.self) private var model
-    let songs: [TrackRow]
+    let route: Route
 
     var body: some View {
-        let ui = model.ui
-        let playing = model.player?.current?.id
-        Table(songs, selection: Binding(get: { ui.songSelection }, set: { ui.songSelection = $0 })) {
-            TableColumn("标题") { row in
-                HStack(spacing: 6) {
-                    if row.id == playing {
-                        Image(systemName: "speaker.wave.2.fill").font(.system(size: 10)).foregroundStyle(.tint)
-                    }
-                    Text(row.title)
-                }
+        let index = model.library?.index
+        switch route {
+        case .album(let id):
+            if let index, let album = index.album(id) {
+                AlbumDetailView(album: album, index: index)
+            } else {
+                ContentUnavailableView("专辑已不在曲库中", systemImage: "square.stack")
             }
-            TableColumn("艺人") { Text($0.artistText) }
-            TableColumn("专辑") { Text($0.album ?? "") }
-            TableColumn("时长") { Text(clock($0.duration)).monospacedDigit() }
-                .width(56)
+        case .person(let role, let id):
+            if let index, let group = index.person(role, id) {
+                PersonDetailView(group: group, role: role, index: index)
+            } else {
+                ContentUnavailableView("已不在曲库中", systemImage: "person")
+            }
         }
-        .contextMenu(forSelectionType: TrackRow.ID.self) { ids in
-            Button("播放下一首") { model.player?.playNext(ordered(ids)) }
-            Button("添加到队列") { model.player?.addToQueue(ordered(ids)) }
-        } primaryAction: { ids in
-            guard let start = songs.firstIndex(where: { ids.contains($0.id) }) else { return }
-            model.player?.play(songs.map(\.id), startAt: start)
-        }
-    }
-
-    private func ordered(_ ids: Set<TrackRow.ID>) -> [Int64] {
-        songs.map(\.id).filter(ids.contains)
     }
 }

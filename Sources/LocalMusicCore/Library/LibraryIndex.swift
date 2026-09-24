@@ -22,11 +22,14 @@ public struct LibraryIndex: Sendable {
     public static let unknownAlbum = "未知专辑"
     public static let variousArtists = "多位艺人"
 
+    /// Changes with every rebuild; lets views memoize derived lists.
+    public let id = UUID()
     public let songs: [TrackRow]
     public let albums: [AlbumGroup]
     public let artists: [PersonGroup]
     public let composers: [PersonGroup]
     public let tracks: [Int64: TrackRow]
+    private let searchKeys: [Int64: String]
 
     public init(rows: [TrackRow]) {
         songs = rows.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -34,6 +37,48 @@ public struct LibraryIndex: Sendable {
         albums = Self.albums(songs)
         artists = Self.people(songs, \.artists)
         composers = Self.people(songs, \.composers)
+        searchKeys = Dictionary(uniqueKeysWithValues: rows.map {
+            ($0.id, Self.searchFold(([$0.title, $0.albumTitle] + $0.artists + $0.composers).joined(separator: "\u{1}")))
+        })
+    }
+
+    // MARK: Search
+
+    /// Case-, width- and diacritic-insensitive, with hiragana folded to katakana (よるしか matches ヨルシカ).
+    public static func searchFold(_ s: String) -> String {
+        let folded = s.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: nil)
+        return folded.applyingTransform(.hiraganaToKatakana, reverse: false) ?? folded
+    }
+
+    private static func needle(_ query: String) -> String {
+        searchFold(query.trimmingCharacters(in: .whitespaces))
+    }
+
+    /// Keeps the given order (e.g. a sorted table's).
+    public func filter(_ rows: [TrackRow], matching query: String) -> [TrackRow] {
+        let needle = Self.needle(query)
+        return needle.isEmpty ? rows : rows.filter { searchKeys[$0.id]?.contains(needle) == true }
+    }
+
+    public func albums(matching query: String) -> [AlbumGroup] {
+        let needle = Self.needle(query)
+        return needle.isEmpty ? albums : albums.filter { Self.searchFold($0.title + "\u{1}" + $0.artist).contains(needle) }
+    }
+
+    public func people(_ role: PersonRole, matching query: String = "") -> [PersonGroup] {
+        let groups = role == .composer ? composers : artists
+        let needle = Self.needle(query)
+        return needle.isEmpty ? groups : groups.filter { Self.searchFold($0.name).contains(needle) }
+    }
+
+    public func album(_ id: String) -> AlbumGroup? { albums.first { $0.id == id } }
+    public func person(_ role: PersonRole, _ id: String) -> PersonGroup? { people(role).first { $0.id == id } }
+
+    /// DISCNUMBER, else a disc folder's number (CD1, Disc 2), else 1.
+    public static func disc(of row: TrackRow) -> Int {
+        if let disc = row.discNo { return disc }
+        let folder = URL(filePath: row.path).deletingLastPathComponent().lastPathComponent
+        return folder.wholeMatch(of: discFolder).flatMap { Int($0.1) } ?? 1
     }
 
     static func fold(_ s: String) -> String {
@@ -41,7 +86,7 @@ public struct LibraryIndex: Sendable {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    private nonisolated(unsafe) static let discFolder = /(?i)(?:cd|dis[ck])\s*[0-9]+/
+    private nonisolated(unsafe) static let discFolder = /(?i)(?:cd|dis[ck])\s*([0-9]+)/
 
     /// The folder that owns an album: disc subfolders (CD1, Disc 2) belong to their parent.
     static func albumFolder(_ path: String) -> String {
@@ -70,14 +115,13 @@ public struct LibraryIndex: Sendable {
         let keys = albumKeys(songs)
         return Dictionary(grouping: songs, by: { keys[$0.id]! }).map { key, rows in
             let ordered = rows.sorted {
-                ($0.discNo ?? 1, $0.trackNo ?? .max) != ($1.discNo ?? 1, $1.trackNo ?? .max)
-                    ? ($0.discNo ?? 1, $0.trackNo ?? .max) < ($1.discNo ?? 1, $1.trackNo ?? .max)
-                    : $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                let a = (disc(of: $0), $0.trackNo ?? .max), b = (disc(of: $1), $1.trackNo ?? .max)
+                return a != b ? a < b : $0.title.localizedStandardCompare($1.title) == .orderedAscending
             }
             return AlbumGroup(id: key, title: rows[0].album.flatMap { $0.isEmpty ? nil : $0 } ?? unknownAlbum,
                               artist: rows.lazy.compactMap(\.albumArtist).first ?? majorityArtist(rows),
                               year: rows.lazy.compactMap(\.year).max(), trackIDs: ordered.map(\.id),
-                              coverTrackID: ordered.first(where: \.hasCover)?.id)
+                              coverTrackID: (ordered.first(where: \.hasCover) ?? ordered.first)?.id)
         }
         .sorted {
             let title = $0.title.localizedStandardCompare($1.title)
@@ -99,7 +143,8 @@ public struct LibraryIndex: Sendable {
         for row in songs {
             let list = row[keyPath: names]
             if list.isEmpty { unknownIDs.append(row.id) }
-            for name in list { groups[fold(name), default: (name, [])].ids.append(row.id) }
+            var seen = Set<String>()
+            for name in list where seen.insert(fold(name)).inserted { groups[fold(name), default: (name, [])].ids.append(row.id) }
         }
         let known = groups.map { PersonGroup(id: $0.key, name: $0.value.name, trackIDs: $0.value.ids, isUnknown: false) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

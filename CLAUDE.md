@@ -19,18 +19,19 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 数据库迁移只追加，不修改已提交的迁移
 - 交给 AVFAudio / MediaPlayer / FSEvents 的回调闭包在 `LocalMusicCore` 的非隔离代码或 `nonisolated static` 工厂里构造，只捕获 Sendable 值，再 `Task { @MainActor in … }` 切回
 - App 目标默认 MainActor 隔离；纯逻辑放 `LocalMusicCore` 以便单测
+- Table 单元格等深层视图不用 `@Environment(AppModel.self)`（排序重建行时会查不到而崩溃），由表格层取出后显式传参（如 `CoverView(store:)`、`PlayingMark(player:)`）
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>]`；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
-- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/跳变/空白） `enableNowPlaying`
+- 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings`） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`，只能写 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/跳变/空白） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset`
 - 状态键：`app` `ui` `windows` `library` `player`（含 `queue`） `measure` `nowPlayingInfo` `snapshots` `perf`
 - 路径占位：`@out`、`@fixtures`
 - 断言比较器：`equals` / `approx`+`tol` / `lt` / `gt` / `contains`；路径为状态 JSON 的点路径（如 `snapshots.shell-dark.isLikelyBlank`）
 
 ## Spike 结论（第 1 步）
 - `cacheDisplay` 渲染不出侧栏的 Liquid Glass 材质（整块空白）→ `snapshot` 默认用 `screencapture -l <windowNumber>` 截真实窗口，无屏幕录制权限时才退回 `cacheDisplay`
-- 窗口必须可见才能截真实画面，因此不做 `alphaValue = 0` 隐藏
+- 窗口必须可见才能截真实画面，因此不做 `alphaValue = 0` 隐藏；显示器睡眠 / 锁屏时 `screencapture -l` 报 "could not create image from window"，快照自动退回 `render` 并在 selftest 输出中警告
 - 自测 App 为 `.accessory`，用户在用其他 App 时不会成为前台：禁止合成鼠标点击（会点进别的 App），交互验证只用 AX 动作（`AXSelected` / `AXPress`）；已验证 AX 选中侧栏行、按下播放条按钮都能驱动 UI。AppleScript 的 `entire contents` 遇到 Table 极慢且会挂起，故改用 Swift AX API
 - `activate` 是尽力而为：用户在用其他 App 时 macOS 拒绝激活（`app.isActive` 记录结果），截图通常是非活动窗口样式
 - `@NSApplicationDelegateAdaptor` 可用

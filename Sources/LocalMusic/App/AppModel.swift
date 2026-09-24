@@ -49,9 +49,32 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     }
 }
 
+enum Route: Hashable {
+    case album(String)
+    case person(PersonRole, String)
+}
+
 @Observable final class UIState {
     var sidebar: SidebarItem = .songs
+    var path: [Route] = []
+    var search = ""
+    var songSort = [KeyPathComparator(\TrackRow.title, comparator: .localizedStandard)]
     var songSelection: Set<Int64> = []
+    @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
+    @ObservationIgnored private var filteredMemo: (index: UUID, search: String, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
+
+    /// Library songs sorted like the table (memoized per sort) then filtered by the search field (memoized per query),
+    /// so typing never re-sorts.
+    func songs(in index: LibraryIndex) -> [TrackRow] {
+        let search = search, sort = songSort
+        if let memo = filteredMemo, memo.index == index.id, memo.search == search, memo.sort == sort { return memo.rows }
+        if sortedMemo?.index != index.id || sortedMemo?.sort != sort {
+            sortedMemo = (index.id, sort, index.songs.sorted(using: sort))
+        }
+        let rows = index.filter(sortedMemo!.rows, matching: search)
+        filteredMemo = (index.id, search, sort, rows)
+        return rows
+    }
     /// Captured from the view environment so non-view code (menus, self-tests) can open Settings.
     @ObservationIgnored var openSettings: OpenSettingsAction?
 }
@@ -64,6 +87,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
     let ui = UIState()
     let library: LibraryModel?
     let player: PlayerModel?
+    let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
 
@@ -71,6 +95,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         precondition(!options.isSelfTest || (options.dataDir != nil && options.outDir != nil), "--selftest requires --out and --data-dir")
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
+        artwork = ArtworkStore(cache: ArtworkCache(directory: paths.cache.appending(path: "artwork")))
         var library: LibraryModel?, player: PlayerModel?
         do {
             library = LibraryModel(store: try LibraryStore(url: paths.database))

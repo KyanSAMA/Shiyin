@@ -174,7 +174,8 @@ struct LibraryIndexTests {
                      composers: [String] = [], dir: String = "/lib", track: Int? = nil) -> TrackRow {
         TrackRow(id: id, path: "\(dir)/\(title).flac", title: title, album: album, albumArtist: albumArtist, artists: artists,
                  composers: composers, trackNo: track, discNo: nil, year: nil, genre: nil, duration: 1, format: "flac",
-                 sampleRate: 44100, bitDepth: 16, hasCover: id % 2 == 0, hasLyrics: false, addedAt: .now, fileMtime: 0)
+                 sampleRate: 44100, bitDepth: 16, hasCover: id % 2 == 0, coverOffset: nil, coverLength: nil, hasLyrics: false,
+                 addedAt: .now, fileMtime: 0)
     }
 
     @Test func groupsAlbumsByAlbumArtistOrFolder() {

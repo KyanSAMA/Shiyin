@@ -25,14 +25,14 @@ public struct PlayQueue: Sendable {
     public var current: QueueEntry? { index.map { entries[$0] } }
     public var upcoming: ArraySlice<QueueEntry> { entries[((index ?? -1) + 1)...] }
 
-    public mutating func replace(with tracks: [Int64], start: Int, using rng: inout some RandomNumberGenerator) {
+    /// `shuffle: nil` keeps the current mode.
+    public mutating func replace(with tracks: [Int64], start: Int, shuffle: Bool? = nil, using rng: inout some RandomNumberGenerator) {
         original = makeEntries(tracks)
         entries = original
         index = entries.isEmpty ? nil : min(max(start, 0), entries.count - 1)
-        if shuffled {
-            shuffled = false
-            setShuffle(true, using: &rng)
-        }
+        let on = shuffle ?? shuffled
+        shuffled = false
+        if on { setShuffle(true, using: &rng) }
     }
 
     /// The entry automatic advance would move to (repeat-one repeats, repeat-all wraps).
