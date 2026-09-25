@@ -241,18 +241,14 @@ enum Route: Hashable {
         _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] in self?.handleKey($0) ?? $0 }
     }
 
-    /// Runs before menu key equivalents. Space plays / pauses in the library window (as a bare-space menu shortcut it
-    /// would swallow spaces typed into the search field); while text is being edited, ⌘-arrows (the skip and volume
-    /// shortcuts) go straight to the field to move the caret. Returns the event if it should continue.
+    /// Runs before menu key equivalents: space plays / pauses in the library window, except while text is being edited
+    /// (as a bare-space menu shortcut it would swallow spaces typed into the search field). Returns the event if it
+    /// should continue.
     func handleKey(_ event: NSEvent) -> NSEvent? {
         guard let window = event.window else { return event }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
-        if let text = window.firstResponder as? NSText {
-            guard modifiers == .command, (123...126).contains(event.keyCode) else { return event }
-            text.keyDown(with: event)   // not window.sendEvent: in the active app that still matches menu key equivalents
-            return nil
-        }
-        guard event.keyCode == 49, modifiers.isEmpty, window.isLibraryWindow, let player, player.queue.current != nil else { return event }
+        guard event.keyCode == 49, modifiers.isEmpty, !(window.firstResponder is NSText), window.isLibraryWindow,
+              let player, player.queue.current != nil else { return event }
         if !event.isARepeat { player.togglePlayPause() }
         return nil
     }
