@@ -87,6 +87,11 @@ enum PlaylistPrompt {
     var action: String { if case .rename = self { "重命名" } else { "创建" } }
 }
 
+enum DropTarget: Equatable {
+    case playlist(Int64)
+    case newPlaylist
+}
+
 enum Route: Hashable {
     case album(String)
 }
@@ -108,6 +113,8 @@ enum Route: Hashable {
     var playlistPrompt: PlaylistPrompt?
     var playlistName = ""
     var deletingPlaylist: Int64?
+    /// What songs are being dragged over in the sidebar.
+    var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var filteredMemo: (index: UUID, search: String, filter: TrackFilter, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var matchesMemo: (index: UUID, filter: TrackFilter, ids: Set<Int64>?)?

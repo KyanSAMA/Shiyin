@@ -93,6 +93,7 @@ struct SongsTableView: NSViewRepresentable {
         table.verticalMotionCanBeginDrag = playlist != nil
         if playlist != nil { table.registerForDraggedTypes([.trackID]) }
         table.setDraggingSourceOperationMask(.move, forLocal: true)
+        table.setDraggingSourceOperationMask([], forLocal: false)   // ids mean nothing to other apps
         table.menu = NSMenu()
         table.menu?.delegate = coordinator
         coordinator.table = table
@@ -192,10 +193,12 @@ struct SongsTableView: NSViewRepresentable {
             model.ui.songSelection = Set(table.selectedRowIndexes.map { rows[$0].id })
         }
 
-        // Dragging carries track ids; a playlist takes them back as a reorder when it shows all its tracks (no search / filter).
+        // Dragging carries track ids: onto a sidebar playlist to add them, or within a playlist to reorder it when it shows
+        // all its tracks (no search / filter).
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
             let item = NSPasteboardItem()
             item.setString(String(rows[row].id), forType: .trackID)
+            item.setString(String(rows[row].id), forType: .string)   // what the SwiftUI sidebar's drop targets read
             return item
         }
 

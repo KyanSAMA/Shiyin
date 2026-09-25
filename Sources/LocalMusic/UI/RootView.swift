@@ -94,6 +94,9 @@ struct SidebarView: View {
                 Section("播放列表") {
                     ForEach(playlists) { playlist in
                         row(item: .playlist(playlist.id), title: playlist.name)
+                            .background(ui.dropTarget == .playlist(playlist.id) ? Color.accentColor.opacity(0.25) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .songDrop(.playlist(playlist.id), ui: ui) { model.library?.addToPlaylist(playlist.id, $0) }
                             .contextMenu {
                                 Button("重命名…") { model.promptRenamePlaylist(playlist) }
                                 Button("删除播放列表…") { ui.deletingPlaylist = playlist.id }
@@ -107,9 +110,10 @@ struct SidebarView: View {
                 Label("新建播放列表", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(ui.dropTarget == .newPlaylist ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
+            .songDrop(.newPlaylist, ui: ui) { model.promptNewPlaylist($0) }   // songs dropped here start a new playlist
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 210)
     }
@@ -211,6 +215,24 @@ struct RouteView: View {
                 AlbumDetailView(album: album, index: index)
             } else {
                 ContentUnavailableView("专辑已不在曲库中", systemImage: "square.stack")
+            }
+        }
+    }
+}
+
+private extension View {
+    /// Takes songs dragged from a song table. Ids come from the drag pasteboard, in row order: the strings SwiftUI hands
+    /// over arrive in load order, and text from other apps carries no track ids.
+    func songDrop(_ target: DropTarget, ui: UIState, perform: @escaping ([Int64]) -> Void) -> some View {
+        dropDestination(for: String.self) { _, _ in
+            let ids = NSPasteboard(name: .drag).pasteboardItems?.compactMap { $0.string(forType: .trackID).flatMap { Int64($0) } } ?? []
+            if !ids.isEmpty { perform(ids) }
+            return !ids.isEmpty
+        } isTargeted: { targeted in
+            if targeted, NSPasteboard(name: .drag).types?.contains(.trackID) == true {
+                ui.dropTarget = target
+            } else if ui.dropTarget == target {
+                ui.dropTarget = nil
             }
         }
     }

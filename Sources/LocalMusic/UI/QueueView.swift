@@ -30,9 +30,14 @@ struct QueueView: View {
                 HStack {
                     Text("接下来")
                     Spacer()
-                    Button("清空") { player.clearUpcoming() }
-                        .buttonStyle(.borderless)
-                        .disabled(upcoming.isEmpty)
+                    Group {
+                        // What the queue shows: the current entry and what's next.
+                        Button("存为播放列表") { model.promptNewPlaylist(([player.queue.current].compactMap { $0 } + upcoming).map(\.trackID)) }
+                            .disabled(player.queue.current == nil && upcoming.isEmpty)
+                        Button("清空") { player.clearUpcoming() }
+                            .disabled(upcoming.isEmpty)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
         }
