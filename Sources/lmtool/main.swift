@@ -8,6 +8,7 @@ import LocalMusicCore
 //   lmtool scan <db> [<root>...]      (default roots: the system Music folder minus its Apple Music library)
 //   lmtool decode-check <file|dir>...  (decodes a chunk at the start and at 50% of every file)
 //   lmtool loudness [--album] <file|dir>...  (BS.1770 integrated loudness and sample peak per file)
+//   lmtool netease search <keywords> | song <id> | lyric <id> | match <file>   (live requests to music.163.com)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -152,6 +153,37 @@ func loudness(_ arguments: [String]) {
     emit(arguments.contains("--album") ? ["tracks": tracks, "album": value(LoudnessAnalyzer.integrated(union))] as [String: Any] : tracks)
 }
 
+func describe(_ song: NeteaseSong) -> [String: Any] {
+    ["id": song.id, "title": song.title, "artists": song.artists, "album": song.album, "cover": value(song.coverURL?.absoluteString),
+     "duration": song.duration, "trackNo": value(song.trackNo), "discNo": value(song.discNo), "year": value(song.year)]
+}
+
+/// What the app's enrichment would pick for a file: its 163 key's song, else a search by title and artist.
+func netease(_ command: String, _ argument: String) async throws {
+    let client = NeteaseClient()
+    switch command {
+    case "search": emit(try await client.search(argument).map(describe))
+    case "song", "lyric":
+        guard let id = Int64(argument) else { throw NeteaseError.malformed }
+        if command == "song" { emit(try await client.song(id).map(describe) ?? NSNull()) } else { print(try await client.lyrics(id) ?? "") }
+    default:
+        let url = URL(filePath: argument)
+        let raw = try await TagReader.read(url)
+        let meta = TrackMetadata(tags: raw.tags, fileURL: url)
+        if let id = meta.ncmKey.flatMap(NCMKey.songID) {
+            return emit(["ncmKey": id, "song": value(try await client.song(id).map(describe))])
+        }
+        let query = MatchQuery(title: meta.title, artists: meta.names(.artist), album: meta.album, duration: raw.properties.duration)
+        let result = Matcher.match(query, candidates: try await client.search(query.keywords))
+        let described: Any = switch result {
+        case .confident(let song, let score): ["confident": describe(song), "score": score] as [String: Any]
+        case .uncertain(let songs): ["uncertain": songs.map(describe)]
+        case .none: "none"
+        }
+        emit(["keywords": query.keywords, "result": described])
+    }
+}
+
 let arguments = Array(CommandLine.arguments.dropFirst())
 switch arguments.first {
 case "tags" where arguments.count > 1:
@@ -164,7 +196,9 @@ case "decode-check" where arguments.count > 1:
     decodeCheck(Array(arguments.dropFirst()))
 case "scan" where arguments.count >= 2:
     try await scan(arguments[1], Array(arguments.dropFirst(2)))
+case "netease" where arguments.count == 3 && ["search", "song", "lyric", "match"].contains(arguments[1]):
+    try await netease(arguments[1], arguments[2])
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>...\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool netease search|song|lyric|match <arg>\n".utf8))
     exit(64)
 }
