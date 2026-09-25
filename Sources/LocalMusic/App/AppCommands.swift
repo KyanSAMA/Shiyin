@@ -38,6 +38,12 @@ struct AppCommands: Commands {
                 Button("减小音量") { player.setVolume(player.volume - 0.1) }
                     .keyboardShortcut(.downArrow)
                 Divider()
+                if let library = model.library {
+                    Toggle("喜欢", isOn: Binding(get: { player.current.map { library.liked[$0.id] != nil } ?? false },
+                                               set: { on in player.current.map { library.setLiked([$0.id], on) } }))
+                        .disabled(player.current == nil)
+                    Divider()
+                }
                 Toggle("随机播放", isOn: Binding(get: { player.queue.shuffled }, set: { player.setShuffle($0) }))
                 Picker("循环", selection: Binding(get: { player.queue.repeatMode }, set: { player.setRepeat($0) })) {
                     Text("关").tag(RepeatMode.off)

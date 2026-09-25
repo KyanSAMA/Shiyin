@@ -188,17 +188,21 @@ struct SongsTableView: NSViewRepresentable {
             guard let table, rows.indices.contains(table.clickedRow) else { return }
             let indexes = table.selectedRowIndexes.contains(table.clickedRow) ? table.selectedRowIndexes : [table.clickedRow]
             let picked = indexes.map { rows[$0] }
-            for (title, action) in [("播放下一首", #selector(playNext)), ("添加到队列", #selector(addToQueue)), ("在访达中显示", #selector(reveal))] {
-                if action == #selector(reveal) { menu.addItem(.separator()) }
+            let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
+            for (title, action) in [("播放下一首", #selector(playNext)), ("添加到队列", #selector(addToQueue)),
+                                    (allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked)), ("在访达中显示", #selector(reveal))] {
+                if action == #selector(toggleLiked) || action == #selector(reveal) { menu.addItem(.separator()) }
                 let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
                 item.target = self
                 item.representedObject = picked
+                item.tag = allLiked ? 0 : 1   // what 喜欢 / 取消喜欢 sets
             }
         }
 
         @objc private func playNext(_ item: NSMenuItem) { model.player?.playNext(picked(item).map(\.id)) }
         @objc private func addToQueue(_ item: NSMenuItem) { model.player?.addToQueue(picked(item).map(\.id)) }
         @objc private func reveal(_ item: NSMenuItem) { revealInFinder(picked(item)) }
+        @objc private func toggleLiked(_ item: NSMenuItem) { model.library?.setLiked(picked(item).map(\.id), item.tag == 1) }
         private func picked(_ item: NSMenuItem) -> [TrackRow] { item.representedObject as? [TrackRow] ?? [] }
     }
 }

@@ -41,6 +41,20 @@ enum Schema {
           file_size INTEGER NOT NULL, file_mtime REAL NOT NULL, analyzer_version INTEGER NOT NULL,
           integrated_lufs REAL, sample_peak REAL, block_energies BLOB, analyzed_at REAL NOT NULL, error TEXT);
         """,
+        """
+        CREATE TABLE liked(
+          track_id INTEGER PRIMARY KEY REFERENCES track(id) ON DELETE CASCADE,
+          liked_at REAL NOT NULL);
+        CREATE TABLE playlist(
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL, created_at REAL NOT NULL, ord INTEGER NOT NULL);
+        CREATE TABLE playlist_item(
+          playlist_id INTEGER NOT NULL REFERENCES playlist(id) ON DELETE CASCADE,
+          pos INTEGER NOT NULL,
+          track_id INTEGER NOT NULL REFERENCES track(id) ON DELETE CASCADE,
+          PRIMARY KEY(playlist_id, pos)) WITHOUT ROWID;
+        CREATE INDEX idx_playlist_item_track ON playlist_item(track_id);
+        """,
     ]
 
     static func migrate(_ db: Database) throws {

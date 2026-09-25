@@ -9,12 +9,14 @@ import LocalMusicCore
     private(set) var scanning = false
     private(set) var lastScan: ScanReport?
     private(set) var lastError: String?
+    private(set) var liked: [Int64: Date] = [:]
 
     @ObservationIgnored private let store: LibraryStore
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var rescanRequested = false
+    @ObservationIgnored private var writes: Task<Void, Never>?
     @ObservationIgnored var onReload: (() -> Void)?
 
     init(store: LibraryStore) {
@@ -28,6 +30,7 @@ import LocalMusicCore
         do {
             if let override { try await store.setRoots(override) }
             roots = try await store.roots()
+            liked = try await store.liked()
             try await reload()
         } catch {
             lastError = String(describing: error)
@@ -93,6 +96,31 @@ import LocalMusicCore
         await scan()
     }
 
+    func setLiked(_ ids: [Int64], _ on: Bool) {
+        for id in ids { liked[id] = on ? liked[id] ?? .now : nil }
+        write { try await $0.setLiked(ids, on) }
+    }
+
+    /// Store writes run one after another, in call order, off the main actor so a quit can wait for them.
+    private func write(_ body: @escaping @Sendable (LibraryStore) async throws -> Void) {
+        let store = store
+        writes = Task.detached { [previous = writes, weak self] in
+            await previous?.value
+            do { try await body(store) } catch { await MainActor.run { self?.lastError = String(describing: error) } }
+        }
+    }
+
+    /// On quit, blocking, like `PlayerModel.saveBeforeQuit`.
+    func finishWrites() {
+        guard let writes else { return }
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            await writes.value
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 2)
+    }
+
     func lyrics(for trackID: Int64) async -> Lyrics? {
         (try? await store.lyrics(for: trackID)) ?? nil
     }
@@ -100,6 +128,7 @@ import LocalMusicCore
     private func reload() async throws {
         let rows = try await store.rows()
         index = await Task.detached { LibraryIndex(rows: rows) }.value
+        liked = liked.filter { index.tracks[$0.key] != nil }   // the store dropped removed tracks' likes itself
         onReload?()
     }
 

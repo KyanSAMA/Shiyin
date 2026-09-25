@@ -1,0 +1,31 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "relaunch": "relaunch/14-liked.json",
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "sidebar", "value": "liked" },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 0 },
+    { "do": "snapshot", "name": "liked-empty" },
+    { "do": "like", "title": "夜に駆ける" },
+    { "do": "like", "title": "群青" },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 2 },
+    { "do": "play", "title": "群青" },
+    { "do": "wait", "seconds": 0.5 },
+    { "do": "snapshot", "name": "liked" },
+    { "do": "like", "value": false },
+    { "do": "assert", "path": "library.liked", "equals": ["夜に駆ける"] },
+    { "do": "fs", "op": "move", "from": "@out/lib/THE BOOK/01 夜に駆ける.flac", "to": "@out/lib/Moved/renamed.flac" },
+    { "do": "rescan" },
+    { "do": "assert", "path": "library.lastScan.removed", "equals": 0 },
+    { "do": "assert", "path": "library.lastScan.updated", "equals": 1 },
+    { "do": "assert", "path": "library.liked", "equals": ["夜に駆ける"] },
+    { "do": "assert", "path": "ui.firstRows", "equals": ["夜に駆ける"] },
+    { "do": "sidebar", "value": "recent" },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 7 },
+    { "do": "wait", "seconds": 0.5 },
+    { "do": "snapshot", "name": "recent" },
+    { "do": "quit" }
+  ]
+}

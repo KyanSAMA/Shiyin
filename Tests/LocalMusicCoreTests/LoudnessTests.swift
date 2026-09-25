@@ -246,7 +246,7 @@ struct LoudnessServiceTests {
             VALUES ('/a.flac', 1, 0, 0, 0, 'flac', 1, 'tag')
             """)
         try Schema.migrate(db)
-        #expect(try db.userVersion() == 2)
+        #expect(try db.userVersion() == Schema.migrations.count)
         #expect(try db.query("SELECT COUNT(*) FROM track") { $0.int(0) } == [1])
         #expect(try db.query("SELECT COUNT(*) FROM loudness") { $0.int(0) } == [0])
     }

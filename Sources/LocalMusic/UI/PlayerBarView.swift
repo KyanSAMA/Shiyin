@@ -7,7 +7,7 @@ struct PlayerBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             if let player = model.player {
-                NowPlayingSummary(player: player, artwork: model.artwork, ui: model.ui)
+                NowPlayingSummary(player: player, library: model.library, artwork: model.artwork, ui: model.ui)
                     .frame(width: 260, alignment: .leading)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
@@ -30,6 +30,7 @@ struct PlayerBarView: View {
 
 private struct NowPlayingSummary: View {
     let player: PlayerModel
+    let library: LibraryModel?
     let artwork: ArtworkStore
     let ui: UIState
 
@@ -56,7 +57,24 @@ private struct NowPlayingSummary: View {
                 }
             }
             .lineLimit(1)
+            Spacer(minLength: 0)
+            if let library, let current = player.current { LikeButton(library: library, track: current.id) }
         }
+    }
+}
+
+struct LikeButton: View {
+    let library: LibraryModel
+    let track: Int64
+
+    var body: some View {
+        let liked = library.liked[track] != nil
+        Button { library.setLiked([track], !liked) } label: {
+            Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.fill" : "heart").font(.system(size: 14))
+        }
+        .buttonStyle(IconButtonStyle(side: 30))
+        .foregroundStyle(liked ? AnyShapeStyle(.pink) : AnyShapeStyle(.secondary))
+        .help(liked ? "取消喜欢" : "喜欢")
     }
 }
 

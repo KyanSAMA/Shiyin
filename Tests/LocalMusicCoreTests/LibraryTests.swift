@@ -87,6 +87,33 @@ struct LibraryScannerTests {
         #expect(try await lib.store.rows().map(\.title) == ["Two"])
     }
 
+    @Test func movedFilesKeepTheirRowAndLikes() async throws {
+        let lib = try TempLibrary()
+        let one = try lib.flac("One.flac", ["TITLE=One"])
+        try lib.flac("Two.flac", ["TITLE=Two"])
+        _ = try await lib.scan()
+        let ids = Dictionary(uniqueKeysWithValues: try await lib.store.rows().map { ($0.title, $0.id) })
+        try await lib.store.setLiked([ids["One"]!, ids["Two"]!], true)
+
+        try FileManager.default.createDirectory(at: lib.root.appending(path: "Sub"), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: one, to: lib.root.appending(path: "Sub/Renamed.flac"))
+        let moved = try await lib.scan()
+        #expect(moved.removed == 0 && moved.added == 0 && moved.updated == 1)
+        let row = try #require(try await lib.store.rows().first { $0.title == "One" })
+        #expect(row.id == ids["One"] && row.path.hasSuffix("Sub/Renamed.flac"))
+        // An analysis queued before the move names the old path: dropped rather than recorded as a failure.
+        let stale = LoudnessJob(trackID: row.id, url: one, size: 0, mtime: row.fileMtime)
+        try await lib.store.saveLoudness(stale, .failure(CocoaError(.fileNoSuchFile)))
+        #expect(try await lib.count("SELECT COUNT(*) FROM loudness") == 0)
+
+        try FileManager.default.removeItem(at: lib.root.appending(path: "Two.flac"))
+        #expect(try await lib.scan().removed == 1)
+        try await lib.store.setLiked([ids["Two"]!, ids["One"]!], true)   // Two is gone: skipped, not a failed transaction
+        #expect(try await Set(lib.store.liked().keys) == [ids["One"]!])
+        try await lib.store.setLiked([ids["One"]!], false)
+        #expect(try await lib.store.liked().isEmpty)
+    }
+
     @Test func sidecarLyricsMarkTheTrackDirty() async throws {
         let lib = try TempLibrary()
         try lib.flac("Song.flac", ["TITLE=Song"])

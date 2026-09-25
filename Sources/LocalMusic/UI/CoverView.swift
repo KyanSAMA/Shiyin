@@ -23,7 +23,7 @@ final class ArtworkStore {
     }
 
     func box(_ row: TrackRow, pixels: Int) -> ArtworkBox {
-        let key = "\(row.id)-\(Int(row.fileMtime))-\(pixels)"
+        let key = "\(row.path)-\(Int(row.fileMtime))-\(pixels)"   // by path: a moved file keeps its id but may change folder art
         clock += 1
         if let entry = boxes[key] {
             boxes[key]?.used = clock

@@ -71,12 +71,14 @@ struct SidebarView: View {
             ui.sidebar = item
             ui.path = []
         })) {
-            Section("资料库") {
-                ForEach(SidebarItem.allCases) { item in
-                    Label(item.title, systemImage: item.symbol)
-                        .tag(item)
-                        // Re-clicking the selected item doesn't reach the selection setter; still pop to its root.
-                        .simultaneousGesture(TapGesture().onEnded { if ui.sidebar == item { ui.path = [] } })
+            ForEach([("资料库", SidebarItem.library), ("精选", SidebarItem.presets)], id: \.0) { title, items in
+                Section(title) {
+                    ForEach(items) { item in
+                        Label(item.title, systemImage: item.symbol)
+                            .tag(item)
+                            // Re-clicking the selected item doesn't reach the selection setter; still pop to its root.
+                            .simultaneousGesture(TapGesture().onEnded { if ui.sidebar == item { ui.path = [] } })
+                    }
                 }
             }
         }
@@ -100,9 +102,18 @@ struct DetailView: View {
                 case .songs:
                     let rows = ui.songs(in: index)
                     Results(ui: ui, isEmpty: rows.isEmpty) { SongsTableView(model: model, rows: rows) }
-                case .albums:
-                    let albums = ui.albums(in: index)
-                    Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index) }
+                case .albums, .recent:
+                    let albums = ui.sidebar == .albums ? ui.albums(in: index) : ui.recentAlbums(in: index)
+                    Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index).id(ui.sidebar) }
+                case .liked:
+                    if library.liked.isEmpty {
+                        ContentUnavailableView("还没有喜欢的歌曲", systemImage: "heart",
+                                               description: Text("点播放条上的心形，或在歌曲上右键选择「喜欢」"))
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        let rows = ui.likedSongs(in: index, liked: library.liked)
+                        Results(ui: ui, isEmpty: rows.isEmpty) { SongsTableView(model: model, rows: rows) }
+                    }
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
                     Results(ui: ui, isEmpty: groups.isEmpty) { PeopleBrowser(groups: groups, role: role, index: index) }

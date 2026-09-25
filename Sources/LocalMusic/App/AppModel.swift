@@ -26,8 +26,11 @@ struct LaunchOptions {
     var isSelfTest: Bool { selfTestScript != nil }
 }
 
-enum SidebarItem: String, CaseIterable, Identifiable {
-    case songs, albums, artists, composers
+enum SidebarItem: String, Identifiable {
+    case songs, albums, artists, composers, recent, liked
+
+    static let library: [Self] = [.songs, .albums, .artists, .composers]
+    static let presets: [Self] = [.recent, .liked]
 
     var id: Self { self }
 
@@ -37,6 +40,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .albums: "专辑"
         case .artists: "艺人"
         case .composers: "作曲"
+        case .recent: "最近添加"
+        case .liked: "喜欢的歌曲"
         }
     }
 
@@ -46,6 +51,8 @@ enum SidebarItem: String, CaseIterable, Identifiable {
         case .albums: "square.stack"
         case .artists: "music.mic"
         case .composers: "pianokeys"
+        case .recent: "clock"
+        case .liked: "heart"
         }
     }
 }
@@ -99,6 +106,19 @@ enum Route: Hashable {
         let groups = index.people(role, matching: search)
         guard let ids = matches(in: index) else { return groups }
         return groups.filter { $0.trackIDs.contains(where: ids.contains) }
+    }
+
+    /// Albums by their latest-added track, newest first.
+    func recentAlbums(in index: LibraryIndex) -> [AlbumGroup] {
+        albums(in: index)
+            .map { album in (album, album.trackIDs.lazy.compactMap { index.tracks[$0]?.addedAt }.max() ?? .distantPast) }
+            .sorted { $0.1 > $1.1 }
+            .prefix(100)
+            .map(\.0)
+    }
+
+    func likedSongs(in index: LibraryIndex, liked: [Int64: Date]) -> [TrackRow] {
+        songs(in: index).filter { liked[$0.id] != nil }
     }
 
     /// The chosen person, else the first one the search and filter leave.

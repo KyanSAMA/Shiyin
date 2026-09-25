@@ -70,7 +70,16 @@ public enum LibraryScanner {
             if let old, old.size == stamp.size, old.mtime == stamp.mtime, old.sidecarMtime == sidecar { continue }
             pending.append((stamp, sidecar, old?.id))
         }
-        let removed = stored.filter { walk.audio[$0.key] == nil && !walk.isUnreachable($0.key) }.map(\.value.id)
+        // A moved or renamed file keeps its size and modification time: it takes over the vanished row, keeping its
+        // likes, playlist entries, loudness analysis and added date.
+        var vanished: [String: [Int64]] = [:]
+        for (key, old) in stored where walk.audio[key] == nil && !walk.isUnreachable(key) {
+            vanished["\(old.size) \(old.mtime)", default: []].append(old.id)
+        }
+        for i in pending.indices where pending[i].2 == nil {
+            pending[i].2 = vanished["\(pending[i].0.size) \(pending[i].0.mtime)"]?.popLast()
+        }
+        let removed = vanished.values.flatMap(\.self)
 
         var report = ScanReport()
         try await withThrowingTaskGroup(of: ScannedTrack.self) { group in

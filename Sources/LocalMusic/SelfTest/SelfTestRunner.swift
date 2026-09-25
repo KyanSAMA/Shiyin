@@ -147,6 +147,13 @@ final class SelfTestRunner {
             try await library().scan()
         case "fs":
             try fileOperation(step)
+        case "like":
+            let library = try library()
+            let ids = try step.string("title").map { title in library.index.songs.filter { $0.title == title }.map(\.id) }
+                ?? [try player().current?.id].compactMap { $0 }
+            guard !ids.isEmpty else { throw SelfTestFailure(description: "nothing to like") }
+            library.setLiked(ids, step["value"] as? Bool ?? true)
+            try await settle()
         case "play":
             try play(step)
         case "togglePlayPause":
@@ -313,6 +320,8 @@ final class SelfTestRunner {
             switch ui.sidebar {
             case .songs: return ui.songs(in: index).map(\.title)
             case .albums: return ui.albums(in: index).map(\.title)
+            case .recent: return ui.recentAlbums(in: index).map(\.title)
+            case .liked: return ui.likedSongs(in: index, liked: model.library?.liked ?? [:]).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)
             case .composers: return ui.people(.composer, in: index).map(\.name)
             }
@@ -353,8 +362,9 @@ final class SelfTestRunner {
     private func fileOperation(_ step: Step) throws {
         let op = try step.required("op")
         let target = URL(filePath: resolve(try step.required(op == "remove" ? "path" : "to"))).standardizedFileURL
-        guard canonicalPath(target.path).hasPrefix(canonicalPath(out.path) + "/") else {
-            throw SelfTestFailure(description: "fs target \(target.path) is outside --out")
+        let sources = op == "move" ? [target, URL(filePath: resolve(try step.required("from"))).standardizedFileURL] : [target]
+        for url in sources where !canonicalPath(url.path).hasPrefix(canonicalPath(out.path) + "/") {
+            throw SelfTestFailure(description: "fs path \(url.path) is outside --out")
         }
         let fm = FileManager.default
         switch op {
@@ -364,6 +374,9 @@ final class SelfTestRunner {
             try fm.copyItem(at: URL(filePath: resolve(try step.required("from"))), to: target)
         case "remove":
             try fm.removeItem(at: target)
+        case "move":
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try fm.moveItem(at: URL(filePath: resolve(try step.required("from"))), to: target)
         default:
             throw SelfTestFailure(description: "unknown fs op \(op)")
         }
@@ -506,6 +519,7 @@ final class SelfTestRunner {
             "trackCount": index.songs.count, "albumCount": index.albums.count,
             "artistCount": index.artists.count, "composerCount": index.composers.count,
             "firstSongs": index.songs.prefix(5).map(\.title),
+            "liked": library.liked.keys.compactMap { index.tracks[$0]?.title }.sorted(),
             "roots": ["include": library.roots.include, "exclude": library.roots.exclude],
             "lastScan": library.lastScan.map {
                 ["total": $0.total, "parsed": $0.parsed, "added": $0.added, "updated": $0.updated, "removed": $0.removed,

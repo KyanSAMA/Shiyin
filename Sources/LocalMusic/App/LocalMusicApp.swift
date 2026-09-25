@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AppModel.shared.player?.saveBeforeQuit()
+        AppModel.shared.library?.finishWrites()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

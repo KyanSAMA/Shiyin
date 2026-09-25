@@ -15,7 +15,7 @@ struct DatabaseTests {
             try Schema.migrate(db)
             #expect(try db.userVersion() == Schema.migrations.count)
             let tables = try db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name") { $0.string(0)! }
-            #expect(tables == ["library_root", "loudness", "lyrics", "setting", "track", "track_person"])
+            #expect(tables == ["library_root", "liked", "loudness", "lyrics", "playlist", "playlist_item", "setting", "track", "track_person"])
         }
         let db = try Database(url: url)
         try Schema.migrate(db)

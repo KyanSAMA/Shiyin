@@ -121,6 +121,26 @@ public actor LibraryStore {
         if let sidecar = track.sidecarLyrics { try lyrics.run([id, "sidecar", sidecar]) }
     }
 
+    // MARK: Liked
+
+    /// Liked track ids with when they were liked.
+    public func liked() throws -> [Int64: Date] {
+        Dictionary(uniqueKeysWithValues: try db.query("SELECT track_id, liked_at FROM liked") {
+            ($0.int64(0)!, Date(timeIntervalSince1970: $0.double(1)!))
+        })
+    }
+
+    /// Tracks a scan removed meanwhile are skipped.
+    public func setLiked(_ ids: [Int64], _ liked: Bool) throws {
+        let now = Date().timeIntervalSince1970
+        try db.transaction {
+            let statement = try db.prepare(liked
+                ? "INSERT OR IGNORE INTO liked(track_id, liked_at) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM track WHERE id = ?)"
+                : "DELETE FROM liked WHERE track_id = ?")
+            for id in ids { try statement.run(liked ? [id, now, id] : [id]) }
+        }
+    }
+
     // MARK: Loudness
 
     /// Tracks without a loudness row for their current file stamp and analyzer version.
@@ -135,7 +155,7 @@ public actor LibraryStore {
     }
 
     /// A failure is recorded too, so an undecodable file isn't retried until it changes. Silently skipped when the
-    /// track was deleted meanwhile.
+    /// track was deleted or moved meanwhile.
     func saveLoudness(_ job: LoudnessJob, _ result: Result<LoudnessResult, Error>) throws {
         let (integrated, peak, blocks, error): (Double?, Double?, Data?, String?) = switch result {
         case .success(let r): (r.integrated, r.samplePeak, r.blockEnergies.withUnsafeBytes { Data($0) }, nil)
@@ -144,9 +164,9 @@ public actor LibraryStore {
         try db.run("""
             INSERT OR REPLACE INTO loudness(track_id, file_size, file_mtime, analyzer_version, integrated_lufs, sample_peak,
                                             block_energies, analyzed_at, error)
-            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM track WHERE id = ?)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM track WHERE id = ? AND path = ?)
             """, [job.trackID, job.size, job.mtime, LoudnessAnalyzer.version, integrated, peak, blocks,
-                  Date().timeIntervalSince1970, error, job.trackID])
+                  Date().timeIntervalSince1970, error, job.trackID, job.url.path])
     }
 
     /// Analyses of the tracks' current files.

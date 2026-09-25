@@ -50,6 +50,7 @@ struct MiniPlayerView: View {
                     }
                     button("下一首", "forward.fill", size: 13) { player.next() }
                     Spacer(minLength: 0)
+                    if let library = model.library, let current = player.current { LikeButton(library: library, track: current.id) }
                     button("显示主窗口", "macwindow", size: 12) { model.showMainWindow() }
                     button("关闭迷你播放器", "xmark", size: 11) { model.setMiniPlayer(false) }
                 }
