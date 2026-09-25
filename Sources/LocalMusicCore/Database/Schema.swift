@@ -55,6 +55,19 @@ enum Schema {
           PRIMARY KEY(playlist_id, pos)) WITHOUT ROWID;
         CREATE INDEX idx_playlist_item_track ON playlist_item(track_id);
         """,
+        """
+        CREATE TABLE enrichment(
+          fingerprint TEXT NOT NULL, field TEXT NOT NULL,
+          source TEXT NOT NULL CHECK(source IN ('user','netease')),
+          value TEXT NOT NULL, updated_at REAL NOT NULL,
+          PRIMARY KEY(fingerprint, field, source)) WITHOUT ROWID;
+        CREATE TABLE netease_match(
+          fingerprint TEXT PRIMARY KEY, song_id INTEGER, confidence REAL,
+          status TEXT NOT NULL CHECK(status IN ('auto','confirmed','pending','none','rejected')),
+          candidates TEXT, updated_at REAL NOT NULL);
+        CREATE INDEX idx_track_fingerprint ON track(fingerprint);
+        ALTER TABLE track ADD COLUMN track_no_source TEXT;
+        """,
     ]
 
     static func migrate(_ db: Database) throws {

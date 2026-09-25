@@ -128,7 +128,7 @@ public struct LibraryIndex: Sendable {
             return AlbumGroup(id: key, title: rows[0].album.flatMap { $0.isEmpty ? nil : $0 } ?? unknownAlbum,
                               artist: rows.lazy.compactMap(\.albumArtist).first ?? majorityArtist(rows),
                               year: rows.lazy.compactMap(\.year).max(), trackIDs: ordered.map(\.id),
-                              coverTrackID: (ordered.first(where: \.hasCover) ?? ordered.first)?.id)
+                              coverTrackID: (ordered.first(where: \.hasArtwork) ?? ordered.first)?.id)
         }
         .sorted {
             let title = $0.title.localizedStandardCompare($1.title)

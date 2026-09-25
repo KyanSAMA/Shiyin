@@ -44,6 +44,8 @@ public struct RawTrack: Sendable, Equatable {
     public var cover: CoverRef?
     /// Bytes the tag parser read from disk (diagnostics; excludes AVFoundation reads).
     public var bytesRead: Int64 = 0
+    /// See `AudioFingerprint`; nil only if the audio payload couldn't be read.
+    public var fingerprint: String?
 }
 
 public enum TagReader {
@@ -51,25 +53,30 @@ public enum TagReader {
 
     public static func read(_ url: URL) async throws -> RawTrack {
         let format = url.pathExtension.lowercased()
+        let source = try FileSource(url: url)
+        var track = try await read(url, format: format, source: source)
+        track.bytesRead = source.bytesRead
+        track.fingerprint = try? AudioFingerprint.compute(FileSource(url: url), format: format)
+        return track
+    }
+
+    private static func read(_ url: URL, format: String, source: FileSource) async throws -> RawTrack {
         switch format {
         case "flac":
-            let source = try FileSource(url: url)
             var track = try FLACReader.read(source)
             if track.properties.frameCount == 0 {
                 let decoded = try AVTagReader.properties(url: url, format: format)
                 track.properties.frameCount = decoded.frameCount
                 track.properties.duration = decoded.duration
             }
-            track.bytesRead = source.bytesRead
             return track
         case "mp3":
-            let source = try FileSource(url: url)
             let properties = try AVTagReader.properties(url: url, format: format)
             if let id3 = try ID3Reader.read(source) {
-                return RawTrack(properties: properties, tags: id3.tags, cover: id3.cover, bytesRead: source.bytesRead)
+                return RawTrack(properties: properties, tags: id3.tags, cover: id3.cover)
             }
             let (tags, cover) = try await AVTagReader.metadata(url: url)
-            return RawTrack(properties: properties, tags: tags, cover: cover, bytesRead: source.bytesRead)
+            return RawTrack(properties: properties, tags: tags, cover: cover)
         case "wav", "m4a":
             let (tags, cover) = try await AVTagReader.metadata(url: url)
             return RawTrack(properties: try AVTagReader.properties(url: url, format: format), tags: tags, cover: cover)

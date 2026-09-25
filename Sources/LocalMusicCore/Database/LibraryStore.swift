@@ -2,9 +2,12 @@ import Foundation
 
 public actor LibraryStore {
     let db: Database
+    /// Enrichment covers, next to the database.
+    public nonisolated let coversDirectory: URL
 
     public init(url: URL) throws {
         db = try Database(url: url)
+        coversDirectory = url.deletingLastPathComponent().appending(path: "Enriched/covers")
         try Schema.migrate(db)
     }
 
@@ -44,8 +47,11 @@ public actor LibraryStore {
     // MARK: Tracks
 
     func stamps() throws -> [String: StoredStamp] {
-        let rows = try db.query("SELECT path, id, file_size, file_mtime, sidecar_mtime FROM track") {
-            ($0.string(0)!.pathKey, StoredStamp(id: $0.int64(1)!, size: $0.int64(2)!, mtime: $0.double(3)!, sidecarMtime: $0.double(4)))
+        let rows = try db.query("""
+            SELECT path, id, file_size, file_mtime, sidecar_mtime, fingerprint IS NULL AND scan_error IS NULL FROM track
+            """) {
+            ($0.string(0)!.pathKey, StoredStamp(id: $0.int64(1)!, size: $0.int64(2)!, mtime: $0.double(3)!, sidecarMtime: $0.double(4),
+                                                needsFingerprint: $0.int(5) == 1))
         }
         return Dictionary(rows, uniquingKeysWith: { first, _ in first })
     }
@@ -75,14 +81,15 @@ public actor LibraryStore {
                 ("scan_error", String?.none), ("codec", p.codec), ("sample_rate", p.sampleRate), ("bit_depth", p.bitDepth),
                 ("channels", p.channels), ("frame_count", p.frameCount), ("duration", p.duration),
                 ("title", meta.title), ("title_source", meta.titleSource.rawValue), ("album", meta.album),
-                ("album_artist", meta.albumArtist), ("track_no", meta.trackNo), ("track_total", meta.trackTotal),
+                ("album_artist", meta.albumArtist), ("track_no", meta.trackNo), ("track_no_source", meta.trackNoSource?.rawValue),
+                ("track_total", meta.trackTotal),
                 ("disc_no", meta.discNo), ("disc_total", meta.discTotal), ("year", meta.year), ("date", meta.date),
                 ("genre", meta.genre), ("cover_offset", raw.cover?.offset), ("cover_length", raw.cover?.length),
                 ("cover_mime", raw.cover?.mime), ("has_cover", raw.cover != nil),
                 ("has_lyrics", meta.lyrics != nil || track.sidecarLyrics != nil),
                 ("rg_track_gain", meta.replayGain.trackGain), ("rg_track_peak", meta.replayGain.trackPeak),
                 ("rg_album_gain", meta.replayGain.albumGain), ("rg_album_peak", meta.replayGain.albumPeak),
-                ("ncm_key", meta.ncmKey),
+                ("ncm_key", meta.ncmKey), ("fingerprint", raw.fingerprint),
             ]
             people = meta.people
             embeddedLyrics = meta.lyrics
@@ -251,34 +258,106 @@ public actor LibraryStore {
     }
 
     /// A sidecar `.lrc` wins over embedded lyrics, so lyrics can be fixed without touching the audio file.
+    /// The sidecar, else embedded, else enrichment lyrics.
     public func lyrics(for trackID: Int64) throws -> Lyrics? {
         // An empty or header-only sidecar parses to nil and must not hide embedded lyrics.
-        try db.query("SELECT lrc FROM lyrics WHERE track_id = ? ORDER BY source = 'sidecar' DESC", [trackID]) {
-            $0.string(0)
-        }.lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
+        let file = try db.query("SELECT lrc FROM lyrics WHERE track_id = ? ORDER BY source = 'sidecar' DESC", [trackID]) { $0.string(0) }
+        let enriched = try db.query("""
+            SELECT e.value FROM enrichment e JOIN track t ON t.fingerprint = e.fingerprint
+            WHERE t.id = ? AND e.field = 'lyrics' ORDER BY e.source = 'user' DESC
+            """, [trackID]) { $0.string(0) }
+        return (file + enriched).lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
+    }
+
+    // MARK: Enrichment
+
+    /// Sets (non-nil) or removes (nil) one source's values for these recordings; fields not given are left alone.
+    public func setEnrichment(_ fingerprints: [String], _ values: [EnrichField: String?], source: EnrichSource) throws {
+        let now = Date().timeIntervalSince1970
+        try db.transaction {
+            let set = try db.prepare("""
+                INSERT INTO enrichment(fingerprint, field, source, value, updated_at) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(fingerprint, field, source) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """)
+            let remove = try db.prepare("DELETE FROM enrichment WHERE fingerprint = ? AND field = ? AND source = ?")
+            for fingerprint in fingerprints {
+                for (field, value) in values {
+                    if let value { try set.run([fingerprint, field.rawValue, source.rawValue, value, now]) }
+                    else { try remove.run([fingerprint, field.rawValue, source.rawValue]) }
+                }
+            }
+        }
+    }
+
+    public func clearEnrichment(_ fingerprints: [String], source: EnrichSource) throws {
+        try db.transaction {
+            let remove = try db.prepare("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?")
+            for fingerprint in fingerprints { try remove.run([fingerprint, source.rawValue]) }
+        }
+    }
+
+    public func enrichment(_ fingerprint: String, source: EnrichSource) throws -> [EnrichField: String] {
+        Dictionary(try db.query("SELECT field, value FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, source.rawValue]) {
+            (EnrichField(rawValue: $0.string(0)!), $0.string(1)!)
+        }.compactMap { field, value in field.map { ($0, value) } }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Playable tracks (files that failed to parse are kept only to avoid re-parsing them).
-    public func rows() throws -> [TrackRow] {
-        var people: [Int64: (artists: [String], composers: [String])] = [:]
-        let credits = try db.query("SELECT track_id, role, name FROM track_person WHERE role IN ('artist', 'composer') ORDER BY track_id, role, ord") {
-            ($0.int64(0)!, $0.string(1)!, $0.string(2)!)
+    /// Tracks as shown: each field is a manual edit, else the file's tag, else online enrichment, else what the scan
+    /// inferred (title and track number from the file name, composers from lyrics credits). `ids` limits the result;
+    /// `without` leaves one source out (the edit sheet shows what clearing a manual edit would reveal).
+    public func rows(_ ids: [Int64]? = nil, without skipped: EnrichSource? = nil) throws -> [TrackRow] {
+        func only(_ column: String) -> String { ids.map { " AND \(column) IN (\($0.map(String.init).joined(separator: ",")))" } ?? "" }
+        var people: [Int64: (artists: [String], composers: [String], credited: [String])] = [:]
+        let credits = try db.query("""
+            SELECT track_id, role, name, source FROM track_person WHERE role IN ('artist', 'composer')\(only("track_id")) ORDER BY track_id, role, ord
+            """) { ($0.int64(0)!, $0.string(1)!, $0.string(2)!, $0.string(3)!) }
+        for (id, role, name, source) in credits {
+            switch (role, source) {
+            case ("artist", _): people[id, default: ([], [], [])].artists.append(name)
+            case (_, ValueSource.lyricsCredit.rawValue): people[id, default: ([], [], [])].credited.append(name)
+            default: people[id, default: ([], [], [])].composers.append(name)
+            }
         }
-        for (id, role, name) in credits {
-            if role == "artist" { people[id, default: ([], [])].artists.append(name) } else { people[id, default: ([], [])].composers.append(name) }
+        var layers: [String: [EnrichField: [EnrichSource: String]]] = [:]
+        let enrichment = try db.query("SELECT fingerprint, field, source, CASE field WHEN 'lyrics' THEN '' ELSE value END FROM enrichment") {
+            ($0.string(0)!, EnrichField(rawValue: $0.string(1)!), EnrichSource(rawValue: $0.string(2)!), $0.string(3)!)
         }
+        for case let (fingerprint, field?, source?, value) in enrichment where source != skipped {
+            layers[fingerprint, default: [:]][field, default: [:]][source] = value
+        }
+        let covers = coversDirectory
         return try db.query("""
             SELECT id, path, title, album, album_artist, track_no, disc_no, year, genre, duration, format, sample_rate,
-                   bit_depth, has_cover, has_lyrics, added_at, file_mtime, cover_offset, cover_length, codec
-            FROM track WHERE scan_error IS NULL
+                   bit_depth, has_cover, has_lyrics, added_at, file_mtime, cover_offset, cover_length, codec, fingerprint, title_source,
+                   track_no_source
+            FROM track WHERE scan_error IS NULL\(only("id"))
             """) { r in
-            let id = r.int64(0)!
-            return TrackRow(id: id, path: r.string(1)!, title: r.string(2) ?? "", album: r.string(3), albumArtist: r.string(4),
-                            artists: people[id]?.artists ?? [], composers: people[id]?.composers ?? [],
-                            trackNo: r.int(5), discNo: r.int(6), year: r.int(7), genre: r.string(8), duration: r.double(9) ?? 0,
-                            format: r.string(10) ?? "", codec: r.string(19), sampleRate: r.int(11), bitDepth: r.int(12),
-                            hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18), hasLyrics: r.int(14) == 1,
-                            addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0), fileMtime: r.double(16) ?? 0)
+            let id = r.int64(0)!, fingerprint = r.string(20)
+            let layer = fingerprint.flatMap { layers[$0] } ?? [:]
+            func pick(_ field: EnrichField, _ file: String?, inferred: String? = nil) -> String? {
+                layer[field]?[.user] ?? file ?? layer[field]?[.netease] ?? inferred
+            }
+            func names(_ field: EnrichField, _ file: [String], inferred: [String] = []) -> [String] {
+                if let user = layer[field]?[.user] { return EnrichField.decode(user) }
+                if !file.isEmpty { return file }
+                return layer[field]?[.netease].map(EnrichField.decode) ?? inferred
+            }
+            let title = r.string(2) ?? "", tagged = r.string(21) == ValueSource.tag.rawValue
+            let credited = people[id]
+            return TrackRow(id: id, path: r.string(1)!, title: pick(.title, tagged ? title : nil, inferred: title) ?? "",
+                            album: pick(.album, r.string(3)), albumArtist: pick(.albumArtist, r.string(4)),
+                            artists: names(.artists, credited?.artists ?? []),
+                            composers: names(.composers, credited?.composers ?? [], inferred: credited?.credited ?? []),
+                            trackNo: pick(.trackNo, r.string(22) == ValueSource.tag.rawValue ? r.int(5).map(String.init) : nil,
+                                          inferred: r.int(5).map(String.init)).flatMap { Int($0) },
+                            discNo: pick(.discNo, r.int(6).map(String.init)).flatMap { Int($0) },
+                            year: pick(.year, r.int(7).map(String.init)).flatMap { Int($0) }, genre: pick(.genre, r.string(8)),
+                            duration: r.double(9) ?? 0, format: r.string(10) ?? "", codec: r.string(19), sampleRate: r.int(11),
+                            bitDepth: r.int(12), hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18),
+                            hasLyrics: r.int(14) == 1 || layer[.lyrics] != nil, addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0),
+                            fileMtime: r.double(16) ?? 0, fingerprint: fingerprint,
+                            coverFile: (layer[.cover]?[.user] ?? layer[.cover]?[.netease]).map { covers.appending(path: $0).path })
         }
     }
 }

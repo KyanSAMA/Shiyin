@@ -67,7 +67,7 @@ public enum LibraryScanner {
         for (key, stamp) in walk.audio {
             let sidecar = walk.sidecars[URL(filePath: key).deletingPathExtension().path]
             let old = stored[key]
-            if let old, old.size == stamp.size, old.mtime == stamp.mtime, old.sidecarMtime == sidecar { continue }
+            if let old, old.size == stamp.size, old.mtime == stamp.mtime, old.sidecarMtime == sidecar, !old.needsFingerprint { continue }
             pending.append((stamp, sidecar, old?.id))
         }
         // A moved or renamed file keeps its size and modification time: it takes over the vanished row, keeping its

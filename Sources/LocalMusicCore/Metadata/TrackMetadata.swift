@@ -31,6 +31,8 @@ public struct TrackMetadata: Sendable, Equatable {
     public var albumArtist: String?
     public var people: [Person]
     public var trackNo: Int?
+    /// `.filename` for a number taken from "53.Title", which online enrichment may replace.
+    public var trackNoSource: ValueSource?
     public var trackTotal: Int?
     public var discNo: Int?
     public var discTotal: Int?
@@ -59,6 +61,7 @@ public struct TrackMetadata: Sendable, Equatable {
 
         let track = Self.numberPair(tags.first("TRACKNUMBER"))
         trackNo = track.number ?? fromName.track
+        trackNoSource = track.number != nil ? .tag : fromName.track != nil ? .filename : nil
         trackTotal = track.total ?? tags.first("TRACKTOTAL", "TOTALTRACKS").flatMap { Int($0) }
         let disc = Self.numberPair(tags.first("DISCNUMBER"))
         discNo = disc.number

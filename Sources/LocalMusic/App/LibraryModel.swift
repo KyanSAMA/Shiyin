@@ -18,6 +18,7 @@ import LocalMusicCore
     @ObservationIgnored private var scanTask: Task<Void, Never>?
     @ObservationIgnored private var rescanRequested = false
     @ObservationIgnored private var writes: Task<Void, Never>?
+    @ObservationIgnored private var reloads = 0
     @ObservationIgnored var onReload: (() -> Void)?
 
     init(store: LibraryStore) {
@@ -103,6 +104,31 @@ import LocalMusicCore
         write { try await $0.setLiked(ids, on) }
     }
 
+    /// Manual edits (nil removes one) for these recordings; returns once the library shows them.
+    func setUserEdits(_ fingerprints: [String], _ edits: [EnrichField: String?]) async {
+        write { try await $0.setEnrichment(fingerprints, edits, source: .user) }
+        await reloadAfterWrites()
+    }
+
+    func revertUserEdits(_ fingerprints: [String]) async {
+        write { try await $0.clearEnrichment(fingerprints, source: .user) }
+        await reloadAfterWrites()
+    }
+
+    func userEdits(_ fingerprint: String) async -> [EnrichField: String] {
+        (try? await store.enrichment(fingerprint, source: .user)) ?? [:]
+    }
+
+    /// The songs as they'd show without manual edits.
+    func uneditedRows(_ ids: [Int64]) async -> [TrackRow] {
+        (try? await store.rows(ids, without: .user)) ?? []
+    }
+
+    private func reloadAfterWrites() async {
+        await writes?.value
+        do { try await reload() } catch { lastError = String(describing: error) }
+    }
+
     func playlist(_ id: Int64) -> Playlist? { playlists.first { $0.id == id } }
 
     /// Returns once stored: the id comes from the store.
@@ -186,9 +212,14 @@ import LocalMusicCore
         (try? await store.lyrics(for: trackID)) ?? nil
     }
 
+    /// Only the latest of overlapping reloads (a scan's, an edit's) lands: it read the newest rows.
     private func reload() async throws {
+        reloads += 1
+        let generation = reloads
         let rows = try await store.rows()
-        index = await Task.detached { LibraryIndex(rows: rows) }.value
+        let index = await Task.detached { LibraryIndex(rows: rows) }.value
+        guard generation == reloads else { return }
+        self.index = index
         // The store dropped removed tracks' likes and playlist entries itself.
         liked = liked.filter { index.tracks[$0.key] != nil }
         for i in playlists.indices { playlists[i].trackIDs.removeAll { index.tracks[$0] == nil } }

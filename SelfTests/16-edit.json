@@ -1,0 +1,35 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "relaunch": "relaunch/16-edit.json",
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "editInfo", "titles": ["夜に駆ける"], "fields": { "title": "夜に駆ける（编辑）", "album": "编辑后的专辑", "year": "2019" } },
+    { "do": "assert", "path": "ui.firstRows", "contains": "夜に駆ける（编辑）" },
+    { "do": "search", "value": "编辑" },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 1 },
+    { "do": "search", "value": "" },
+    { "do": "editInfo", "titles": ["Part 1", "Part 2"], "fields": { "artists": "新艺人 / 另一位" } },
+    { "do": "sidebar", "value": "artists" },
+    { "do": "assert", "path": "ui.firstRows", "contains": "另一位" },
+    { "do": "sidebar", "value": "albums" },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 8 },
+    { "do": "assert", "path": "ui.firstRows", "contains": "编辑后的专辑" },
+
+    { "do": "fs", "op": "move", "from": "@out/lib/THE BOOK/01 夜に駆ける.flac", "to": "@out/lib/Moved/renamed.flac" },
+    { "do": "rescan" },
+    { "do": "fs", "op": "remove", "path": "@out/lib/Moved/renamed.flac" },
+    { "do": "rescan" },
+    { "do": "fs", "op": "copy", "from": "@fixtures/library/THE BOOK/01 夜に駆ける.flac", "to": "@out/lib/Back/01.flac" },
+    { "do": "rescan" },
+    { "do": "sidebar", "value": "songs" },
+    { "do": "assert", "path": "ui.firstRows", "contains": "夜に駆ける（编辑）" },
+
+    { "do": "editInfo", "titles": ["夜に駆ける（编辑）"], "fields": { "year": "20x9" }, "keepOpen": true },
+    { "do": "wait", "seconds": 0.5 },
+    { "do": "snapshot", "name": "edit-sheet" },
+    { "do": "closeEditInfo" },
+    { "do": "quit" }
+  ]
+}

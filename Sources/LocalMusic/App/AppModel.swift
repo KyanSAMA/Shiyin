@@ -113,6 +113,7 @@ enum Route: Hashable {
     var playlistPrompt: PlaylistPrompt?
     var playlistName = ""
     var deletingPlaylist: Int64?
+    var infoEditor: InfoEditor?
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?

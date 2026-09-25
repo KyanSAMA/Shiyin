@@ -1,0 +1,15 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "library.scanning", "equals": false, "timeout": 10 },
+    { "do": "assert", "path": "ui.firstRows", "contains": "夜に駆ける（编辑）" },
+    { "do": "editInfo", "titles": ["夜に駆ける（编辑）"], "fields": { "title": "" } },
+    { "do": "assert", "path": "ui.firstRows", "contains": "夜に駆ける" },
+    { "do": "sidebar", "value": "albums" },
+    { "do": "assert", "path": "ui.firstRows", "contains": "编辑后的专辑" },
+    { "do": "revertInfo", "titles": ["夜に駆ける"] },
+    { "do": "assert", "path": "ui.visibleCount", "equals": 7 }
+  ]
+}

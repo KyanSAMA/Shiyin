@@ -62,8 +62,12 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public let hasLyrics: Bool
     public let addedAt: Date
     public let fileMtime: Double
+    public var fingerprint: String? = nil
+    /// A downloaded or chosen cover, for a file without its own.
+    public var coverFile: String? = nil
 
     public var url: URL { URL(filePath: path) }
+    public var hasArtwork: Bool { hasCover || coverFile != nil }
     public var artistText: String { artists.joined(separator: " / ") }
 
     // Non-optional sort keys for table columns.
@@ -94,6 +98,8 @@ struct StoredStamp: Sendable {
     let size: Int64
     let mtime: Double
     let sidecarMtime: Double?
+    /// Parsed before fingerprints existed: parse once more to fill it in.
+    var needsFingerprint = false
 }
 
 struct ScannedTrack: Sendable {

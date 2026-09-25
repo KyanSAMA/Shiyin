@@ -21,7 +21,7 @@ struct PeopleBrowser: View {
                     listFocused = true
                 })) { group in
                     HStack(spacing: 10) {
-                        CoverView(store: model.artwork, row: group.trackIDs.lazy.compactMap { index.tracks[$0] }.first(where: \.hasCover),
+                        CoverView(store: model.artwork, row: group.trackIDs.lazy.compactMap { index.tracks[$0] }.first(where: \.hasArtwork),
                                   size: 34, radius: 17)
                         Text(group.name).foregroundStyle(group.isUnknown ? .secondary : .primary).lineLimit(1)
                     }

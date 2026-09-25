@@ -277,6 +277,7 @@ struct SongsTableView: NSViewRepresentable {
             if playlist != nil { add("从播放列表中移除", #selector(removeFromPlaylist)) }
             let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
             add(allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked), tag: allLiked ? 0 : 1)   // tag: what it sets
+            add("编辑信息…", #selector(editInfo))
             menu.addItem(.separator())
             add("在访达中显示", #selector(reveal))
         }
@@ -290,6 +291,7 @@ struct SongsTableView: NSViewRepresentable {
             model.library?.removeFromPlaylist(playlist, Set(picked(item).map(\.id)))
         }
         @objc private func reveal(_ item: NSMenuItem) { revealInFinder(picked(item)) }
+        @objc private func editInfo(_ item: NSMenuItem) { Task { await model.editInfo(picked(item)) } }
         @objc private func toggleLiked(_ item: NSMenuItem) { model.library?.setLiked(picked(item).map(\.id), item.tag == 1) }
         private func picked(_ item: NSMenuItem) -> [TrackRow] { item.representedObject as? [TrackRow] ?? [] }
     }

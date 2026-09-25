@@ -45,6 +45,7 @@ private final class TempLibrary {
 
 extension LibraryStore {
     func count(_ sql: String) throws -> Int { try db.query(sql) { $0.int(0) ?? 0 }.first ?? 0 }
+    func run(_ sql: String) throws { try db.run(sql) }
 }
 
 struct DirectoryWalkerTests {
@@ -135,6 +136,40 @@ struct LibraryScannerTests {
         try await lib.store.deletePlaylist(first.id)
         #expect(try await lib.store.playlists().map(\.name) == ["Two"])
         #expect(try await lib.count("SELECT COUNT(*) FROM playlist_item") == 0)
+    }
+
+    @Test func enrichmentFillsGapsEditsWinAndBothFollowTheRecording() async throws {
+        let lib = try TempLibrary()
+        let url = try lib.flac("01 From Name.flac", ["ARTIST=A", "ALBUM=Tagged"])
+        _ = try await lib.scan()
+        let fingerprint = try #require(try await lib.store.rows().first?.fingerprint)
+        let netease: [EnrichField: String?] = [.title: "Net", .album: "Net Album", .year: "2020", .artists: EnrichField.encode(["N"]),
+                                               .composers: EnrichField.encode(["C"]), .lyrics: "[00:01.00]hi"]
+        try await lib.store.setEnrichment([fingerprint], netease, source: .netease)
+        var row = try #require(try await lib.store.rows().first)
+        #expect(row.title == "Net" && row.album == "Tagged" && row.year == 2020 && row.artists == ["A"] && row.composers == ["C"])
+        #expect(row.hasLyrics && row.trackNo == 1)
+        try await lib.store.setEnrichment([fingerprint], [.trackNo: "7"], source: .netease)
+        #expect(try await lib.store.rows().first?.trackNo == 7)   // "01 From Name" only inferred it
+        guard case .synced(let lines)? = try await lib.store.lyrics(for: row.id) else { Issue.record("no enriched lyrics"); return }
+        #expect(lines.map(\.text) == ["hi"])
+
+        try await lib.store.setEnrichment([fingerprint], [.title: "Mine", .album: "My Album"], source: .user)
+        let bytes = try Data(contentsOf: url)
+        try FileManager.default.removeItem(at: url)
+        _ = try await lib.scan()
+        try bytes.write(to: lib.root.appending(path: "Back.flac"))
+        _ = try await lib.scan()
+        row = try #require(try await lib.store.rows().first)
+        #expect(row.title == "Mine" && row.album == "My Album" && row.fingerprint == fingerprint)
+        #expect(try await lib.store.rows([row.id], without: .user).first?.title == "Net")
+
+        try await lib.store.clearEnrichment([fingerprint], source: .user)
+        #expect(try await lib.store.rows().first?.album == "Tagged")
+
+        try await lib.store.run("UPDATE track SET fingerprint = NULL")
+        #expect(try await lib.scan().parsed == 1)
+        #expect(try await lib.store.rows().first?.fingerprint == fingerprint)
     }
 
     @Test func sidecarLyricsMarkTheTrackDirty() async throws {

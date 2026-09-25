@@ -172,6 +172,24 @@ final class SelfTestRunner {
         case "deletePlaylist":
             model.deletePlaylist(try playlist(step.required("name")).id)
             try await settle()
+        case "editInfo":
+            // Through the sheet: open it, fill `fields` (EnrichField names), then save unless `keepOpen`.
+            let index = try library().index
+            await model.editInfo(try trackIDs(step).compactMap { index.tracks[$0] })
+            guard let editor = model.ui.infoEditor else { throw SelfTestFailure(description: "no editor") }
+            for (key, value) in step["fields"] as? [String: String] ?? [:] {
+                guard let field = EnrichField(rawValue: key) else { throw SelfTestFailure(description: "unknown field \(key)") }
+                editor.texts[field] = value
+            }
+            if step["keepOpen"] as? Bool != true { await model.saveInfo(editor) }
+            try await settle()
+        case "closeEditInfo":
+            model.ui.infoEditor = nil
+            try await settle()
+        case "revertInfo":
+            let index = try library().index
+            await model.revertInfo(try trackIDs(step).compactMap { index.tracks[$0] })
+            try await settle()
         case "like":
             let library = try library()
             let ids = try step.string("title").map { title in library.index.songs.filter { $0.title == title }.map(\.id) }

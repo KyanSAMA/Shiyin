@@ -52,12 +52,15 @@ public actor ArtworkCache {
         let folderImage: URL?
     }
 
-    /// Embedded art keyed by track and file mtime; folder art by the image's path and mtime.
+    /// Embedded art keyed by track and file mtime; folder art by the image's path and mtime; then an enrichment cover
+    /// (its file name changes with each download).
     static func source(for row: TrackRow) -> Source? {
         if row.hasCover { return Source(key: "t\(row.id)-\(Int(row.fileMtime))", track: row, folderImage: nil) }
         guard let url = folderImage(near: row),
               let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        else { return nil }
+        else {
+            return row.coverFile.map { Source(key: "e" + TagReader.sha256(Data($0.utf8)).prefix(16), track: row, folderImage: URL(filePath: $0)) }
+        }
         return Source(key: "f" + TagReader.sha256(Data(url.path.utf8)).prefix(16) + "-\(Int(mtime.timeIntervalSince1970))",
                       track: row, folderImage: url)
     }

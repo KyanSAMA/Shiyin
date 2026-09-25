@@ -58,6 +58,9 @@ struct RootView: View {
             Button("取消", role: .cancel) {}
             Button(prompt.action) { model.commitPlaylistPrompt(prompt) }.keyboardShortcut(.defaultAction)
         }
+        .sheet(isPresented: Binding(get: { ui.infoEditor != nil }, set: { if !$0 { ui.infoEditor = nil } })) {
+            if let editor = ui.infoEditor { InfoEditorView(model: model, editor: editor) }
+        }
         .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",
                             isPresented: Binding(get: { ui.deletingPlaylist != nil }, set: { if !$0 { ui.deletingPlaylist = nil } }),
                             titleVisibility: .visible, presenting: ui.deletingPlaylist) { id in
