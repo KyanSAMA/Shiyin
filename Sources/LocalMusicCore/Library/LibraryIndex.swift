@@ -80,7 +80,6 @@ public struct LibraryIndex: Sendable {
 
     public func album(_ id: String) -> AlbumGroup? { albums.first { $0.id == id } }
     public func album(containing trackID: Int64) -> AlbumGroup? { albumOfTrack[trackID].map { albums[$0] } }
-    public func person(_ role: PersonRole, _ id: String) -> PersonGroup? { people(role).first { $0.id == id } }
 
     /// DISCNUMBER, else a disc folder's number (CD1, Disc 2), else 1.
     public static func disc(of row: TrackRow) -> Int {

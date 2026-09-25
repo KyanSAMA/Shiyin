@@ -206,6 +206,16 @@ struct SongsTableView: NSViewRepresentable {
 /// Return plays the selection, as double-click does.
 private final class TrackTable: NSTableView {
     var onReturn: (() -> Void)?
+    private var fitted = false
+
+    /// Column autoresizing only spreads later width changes: a table first shown narrower than its columns would
+    /// otherwise scroll sideways.
+    override func layout() {
+        super.layout()
+        guard !fitted, let width = enclosingScrollView?.contentView.bounds.width, width > 0 else { return }
+        fitted = true
+        sizeToFit()
+    }
 
     override func keyDown(with event: NSEvent) {
         guard event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else {

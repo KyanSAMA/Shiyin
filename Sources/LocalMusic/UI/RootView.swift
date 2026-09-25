@@ -105,7 +105,7 @@ struct DetailView: View {
                     Results(ui: ui, isEmpty: albums.isEmpty) { AlbumsGrid(albums: albums, index: index) }
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
-                    Results(ui: ui, isEmpty: groups.isEmpty) { PeopleList(groups: groups, role: role).id(ui.listID + [role]) }
+                    Results(ui: ui, isEmpty: groups.isEmpty) { PeopleBrowser(groups: groups, role: role, index: index) }
                 }
             }
         } else if let library = model.library, library.scanning || !library.started {
@@ -157,12 +157,6 @@ struct RouteView: View {
                 AlbumDetailView(album: album, index: index)
             } else {
                 ContentUnavailableView("专辑已不在曲库中", systemImage: "square.stack")
-            }
-        case .person(let role, let id):
-            if let index, let group = index.person(role, id) {
-                PersonDetailView(group: group, role: role, index: index)
-            } else {
-                ContentUnavailableView("已不在曲库中", systemImage: "person")
             }
         }
     }

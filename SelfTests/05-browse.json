@@ -27,12 +27,19 @@
     { "do": "assert", "path": "ui.visibleCount", "equals": 10 },
     { "do": "snapshot", "name": "artists" },
     { "do": "openPerson", "name": "YOASOBI" },
-    { "do": "assert", "path": "ui.visibleCount", "equals": 2 },
+    { "do": "assert", "path": "ui.person.name", "equals": "YOASOBI" },
+    { "do": "assert", "path": "ui.person.trackCount", "equals": 2 },
     { "do": "wait", "seconds": 0.5 },
     { "do": "snapshot", "name": "artist-detail" },
+    { "do": "openAlbum", "title": "THE BOOK" },
+    { "do": "back" },
+    { "do": "assert", "path": "ui.person.name", "equals": "YOASOBI" },
     { "do": "sidebar", "value": "composers" },
     { "do": "assert", "path": "ui.firstRows", "contains": "未知" },
     { "do": "assert", "path": "ui.visibleCount", "equals": 3 },
+    { "do": "assert", "path": "ui.person.trackCount", "gt": 0 },
+    { "do": "wait", "seconds": 0.5 },
+    { "do": "snapshot", "name": "composer-detail" },
     { "do": "state", "name": "end" }
   ]
 }

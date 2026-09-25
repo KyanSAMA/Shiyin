@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import LocalMusicCore
 
-/// Header shared by album and person pages.
+/// Album page header.
 struct CollectionHeader<Artwork: View>: View {
     @Environment(AppModel.self) private var model
     let title: String

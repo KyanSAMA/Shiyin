@@ -52,7 +52,6 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 
 enum Route: Hashable {
     case album(String)
-    case person(PersonRole, String)
 }
 
 @Observable final class UIState {
@@ -68,6 +67,7 @@ enum Route: Hashable {
     var animationsEnabled = true
     var queueShown = false
     var filter = TrackFilter()
+    var personSelection: [PersonRole: String] = [:]
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var filteredMemo: (index: UUID, search: String, filter: TrackFilter, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var matchesMemo: (index: UUID, filter: TrackFilter, ids: Set<Int64>?)?
@@ -99,6 +99,11 @@ enum Route: Hashable {
         let groups = index.people(role, matching: search)
         guard let ids = matches(in: index) else { return groups }
         return groups.filter { $0.trackIDs.contains(where: ids.contains) }
+    }
+
+    /// The chosen person, else the first one the search and filter leave.
+    func selectedPerson(_ role: PersonRole, in groups: [PersonGroup]) -> PersonGroup? {
+        groups.first { $0.id == personSelection[role] } ?? groups.first
     }
 
     private func matches(in index: LibraryIndex) -> Set<Int64>? {

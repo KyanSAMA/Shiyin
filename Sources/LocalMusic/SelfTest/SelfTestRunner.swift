@@ -123,7 +123,9 @@ final class SelfTestRunner {
             guard let group = try library().index.people(role).first(where: { $0.name == name }) else {
                 throw SelfTestFailure(description: "no \(role) \(name)")
             }
-            model.ui.path = [.person(role, group.id)]
+            model.ui.sidebar = role == .artist ? .artists : .composers
+            model.ui.path = []
+            model.ui.personSelection[role] = group.id
             try await settle()
         case "back":
             _ = model.ui.path.popLast()
@@ -289,6 +291,17 @@ final class SelfTestRunner {
         } ?? []
     }
 
+    /// The person the artists / composers page shows.
+    private func personState() -> Any {
+        let ui = model.ui
+        guard let index = model.library?.index, ui.path.isEmpty, ui.sidebar == .artists || ui.sidebar == .composers else { return NSNull() }
+        let role: PersonRole = ui.sidebar == .artists ? .artist : .composer
+        guard let group = ui.selectedPerson(role, in: ui.people(role, in: index)) else { return NSNull() }
+        let ids = Set(group.trackIDs)
+        return ["name": group.name, "trackCount": group.trackIDs.count,
+                "albumCount": index.albums.count { $0.trackIDs.contains(where: ids.contains) }] as Step
+    }
+
     /// Titles or names the current page shows, in display order.
     private func visibleTitles() -> [String] {
         guard let index = model.library?.index else { return [] }
@@ -296,8 +309,6 @@ final class SelfTestRunner {
         switch ui.path.last {
         case .album(let id)?:
             return index.album(id)?.trackIDs.compactMap { index.tracks[$0]?.title } ?? []
-        case .person(let role, let id)?:
-            return index.person(role, id)?.trackIDs.compactMap { index.tracks[$0] }.sorted(using: ui.songSort).map(\.title) ?? []
         case nil:
             switch ui.sidebar {
             case .songs: return ui.songs(in: index).map(\.title)
@@ -466,7 +477,7 @@ final class SelfTestRunner {
                    "filterChips": model.ui.filter.chips.map { [$0.dimension, $0.value].compactMap { $0 }.joined(separator: " ") },
                    "searchFocused": mainWindow?.firstResponder is NSText, "nowPlaying": model.ui.nowPlayingShown,
                    "sort": model.ui.songSort.first.map { "\(SongColumn($0)?.rawValue ?? "?")\($0.order == .forward ? "+" : "-")" } ?? "",
-                   "selectionCount": model.ui.songSelection.count,
+                   "selectionCount": model.ui.songSelection.count, "person": personState(),
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
             "windows": ["main": main, "mini": miniState(), "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
