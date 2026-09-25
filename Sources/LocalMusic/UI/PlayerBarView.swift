@@ -64,7 +64,7 @@ private struct TransportControls: View {
     let player: PlayerModel
 
     var body: some View {
-        HStack(spacing: 22) {
+        HStack(spacing: 12) {
             toggle("随机播放", "shuffle", on: player.queue.shuffled) { player.setShuffle(!player.queue.shuffled) }
             button("上一首", "backward.fill", size: 15) { player.previous() }
             button(player.isPlaying ? "暂停" : "播放", player.isPlaying ? "pause.fill" : "play.fill", size: 24) {
@@ -75,15 +75,12 @@ private struct TransportControls: View {
                 player.setRepeat(player.queue.repeatMode.next)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle(side: 34))
     }
 
     private func button(_ title: String, _ symbol: String, size: CGFloat, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol).labelStyle(.iconOnly).font(.system(size: size))
-        }
-        .frame(width: 28, height: 28)
-        .contentShape(Rectangle())
+        Button(action: action) { Label(title, systemImage: symbol).font(.system(size: size)) }
+            .help(title)
     }
 
     private func toggle(_ title: String, _ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
@@ -98,18 +95,32 @@ private struct PageToggles: View {
 
     var body: some View {
         let ui = model.ui
-        HStack(spacing: 14) {
-            Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble").labelStyle(.iconOnly) }
+        HStack(spacing: 2) {
+            Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble") }
                 .foregroundStyle(ui.nowPlayingShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .disabled(!hasTrack)
-            Button { ui.queueShown.toggle() } label: { Label("播放队列", systemImage: "list.bullet").labelStyle(.iconOnly) }
+            Button { ui.queueShown.toggle() } label: { Label("播放队列", systemImage: "list.bullet") }
                 .foregroundStyle(ui.queueShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-            Button { model.setMiniPlayer(!model.miniPlayerShown) } label: { Label("迷你播放器", systemImage: "pip.enter").labelStyle(.iconOnly) }
+            Button { model.setMiniPlayer(!model.miniPlayerShown) } label: { Label("迷你播放器", systemImage: "pip.enter") }
                 .foregroundStyle(model.miniPlayerShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .help("迷你播放器（⌥⌘M）")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle(side: 30))
         .font(.system(size: 14))
+    }
+}
+
+/// Icon buttons whose whole square takes clicks (a plain button only takes them on the glyph), dimmed while pressed.
+struct IconButtonStyle: ButtonStyle {
+    let side: CGFloat
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(.iconOnly)
+            .frame(width: side, height: side)
+            .contentShape(Rectangle())
+            .opacity(!isEnabled ? 0.3 : configuration.isPressed ? 0.4 : 1)
     }
 }
 
@@ -142,10 +153,10 @@ private struct NormalizationMenu: View {
         Menu {
             NormalizationPicker(loudness: loudness).pickerStyle(.inline)
         } label: {
-            Label("响度均衡", systemImage: "waveform").labelStyle(.iconOnly)
+            Label("响度均衡", systemImage: "waveform")
         }
         .menuStyle(.button)
-        .buttonStyle(.plain)
+        .buttonStyle(IconButtonStyle(side: 30))
         .menuIndicator(.hidden)
         .fixedSize()
         .foregroundStyle(loudness.mode == .off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))

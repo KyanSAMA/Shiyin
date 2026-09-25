@@ -5,7 +5,7 @@ import LocalMusicCore
 extension NSPanel {
     /// Floats over other apps (full-screen ones too) on every Space, and never activates the app when clicked.
     static func miniPlayer(_ model: AppModel, player: PlayerModel) -> NSPanel {
-        let size = NSSize(width: 360, height: 108)
+        let size = NSSize(width: 360, height: 112)
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
                             backing: .buffered, defer: false)
         panel.identifier = NSUserInterfaceItemIdentifier("mini")
@@ -43,7 +43,7 @@ struct MiniPlayerView: View {
                 Text(player.current?.artistText ?? "").font(.system(size: 11)).foregroundStyle(.secondary)
                 MiniLyric(player: player)
                 Spacer(minLength: 0)
-                HStack(spacing: 16) {
+                HStack(spacing: 6) {
                     button("上一首", "backward.fill", size: 13) { player.previous() }
                     button(player.isPlaying ? "暂停" : "播放", player.isPlaying ? "pause.fill" : "play.fill", size: 18) {
                         player.togglePlayPause()
@@ -68,12 +68,9 @@ struct MiniPlayerView: View {
     }
 
     private func button(_ title: String, _ symbol: String, size: CGFloat, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol).labelStyle(.iconOnly).font(.system(size: size)).frame(width: 22, height: 22)
-        }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .help(title)
+        Button(action: action) { Label(title, systemImage: symbol).font(.system(size: size)) }
+            .buttonStyle(IconButtonStyle(side: 28))
+            .help(title)
     }
 }
 

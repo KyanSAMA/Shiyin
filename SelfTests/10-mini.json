@@ -12,7 +12,7 @@
     { "do": "assert", "path": "windows.mini.nonactivating", "equals": true },
     { "do": "assert", "path": "windows.mini.hidesOnDeactivate", "equals": false },
     { "do": "assert", "path": "windows.mini.width", "equals": 360 },
-    { "do": "assert", "path": "windows.mini.height", "equals": 108 },
+    { "do": "assert", "path": "windows.mini.height", "equals": 112 },
     { "do": "waitUntil", "path": "lyrics.index", "equals": 4, "timeout": 6 },
     { "do": "wait", "seconds": 0.6 },
     { "do": "snapshot", "name": "mini", "window": "mini" },
