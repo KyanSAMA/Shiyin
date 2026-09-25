@@ -36,6 +36,10 @@ enum SongColumn: String, CaseIterable {
     }
 }
 
+extension NSPasteboard.PasteboardType {
+    static let trackID = Self("com.localmusic.track-id")
+}
+
 /// The song list as a plain NSTableView: SwiftUI's Table hosts a SwiftUI view per cell and re-measures each one, so every
 /// re-sort, search or filter rebuilt it for 130–230 ms. Double-click or Return plays the list from that row.
 struct SongsTableView: NSViewRepresentable {
@@ -43,6 +47,8 @@ struct SongsTableView: NSViewRepresentable {
     let rows: [TrackRow]
     /// For an album's track list: track numbers instead of covers, album order, artists only where they differ.
     var album: AlbumGroup?
+    /// For a playlist: its order with positions, drag to reorder, ⌫ to remove.
+    var playlist: Int64?
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model) }
 
@@ -53,11 +59,13 @@ struct SongsTableView: NSViewRepresentable {
         table.allowsMultipleSelection = true
         table.rowHeight = 36
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        let columns: [SongColumn] = album == nil ? [.title, .artist, .album, .year, .duration, .added] : [.number, .title, .artist, .duration]
+        let columns: [SongColumn] = if album != nil { [.number, .title, .artist, .duration] }
+            else if playlist != nil { [.number, .title, .artist, .album, .duration] }
+            else { [.title, .artist, .album, .year, .duration, .added] }
         for column in columns {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = column.header
-            if album == nil, column.comparator(.forward) != nil {
+            if album == nil, playlist == nil, column.comparator(.forward) != nil {
                 tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.rawValue, ascending: true)
             }
             switch column {
@@ -80,6 +88,11 @@ struct SongsTableView: NSViewRepresentable {
         table.target = coordinator
         table.doubleAction = #selector(Coordinator.doubleClicked(_:))
         table.onReturn = { [weak coordinator] in coordinator?.playSelection() }
+        table.onDelete = { [weak coordinator] in coordinator?.removeSelection() }
+        // Only a playlist reorders by dragging vertically; elsewhere vertical drags keep extending the selection.
+        table.verticalMotionCanBeginDrag = playlist != nil
+        if playlist != nil { table.registerForDraggedTypes([.trackID]) }
+        table.setDraggingSourceOperationMask(.move, forLocal: true)
         table.menu = NSMenu()
         table.menu?.delegate = coordinator
         coordinator.table = table
@@ -93,8 +106,8 @@ struct SongsTableView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let ui = model.ui
-        context.coordinator.update(rows: rows, album: album, selection: ui.songSelection, sort: album == nil ? ui.songSort.first : nil,
-                                   playing: model.player?.current?.id)
+        context.coordinator.update(rows: rows, album: album, playlist: playlist, selection: ui.songSelection,
+                                   sort: album == nil && playlist == nil ? ui.songSort.first : nil, playing: model.player?.current?.id)
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
@@ -102,6 +115,7 @@ struct SongsTableView: NSViewRepresentable {
         weak var table: NSTableView?
         private var rows: [TrackRow] = []
         private var album: AlbumGroup?
+        private var playlist: Int64?
         private var multiDisc = false
         private var playing: Int64?
         /// Set while the model pushes state into the table, so the table's callbacks don't echo it back.
@@ -111,14 +125,16 @@ struct SongsTableView: NSViewRepresentable {
             self.model = model
         }
 
-        func update(rows: [TrackRow], album: AlbumGroup?, selection: Set<Int64>, sort: KeyPathComparator<TrackRow>?, playing: Int64?) {
+        func update(rows: [TrackRow], album: AlbumGroup?, playlist: Int64?, selection: Set<Int64>, sort: KeyPathComparator<TrackRow>?,
+                    playing: Int64?) {
             guard let table else { return }
             applying = true
             defer { applying = false }
             // Whole rows, not ids: a rescan can change a title, path or cover under the same id.
-            if rows != self.rows || album != self.album {
+            if rows != self.rows || album != self.album || playlist != self.playlist {
                 self.rows = rows
                 self.album = album
+                self.playlist = playlist
                 multiDisc = album != nil && Set(rows.map(LibraryIndex.disc)).count > 1
                 self.playing = playing
                 table.reloadData()
@@ -147,8 +163,10 @@ struct SongsTableView: NSViewRepresentable {
                 return cell
             }
             let cell = tableView.makeView(withIdentifier: id, owner: nil) as? TextCell
-                ?? TextCell(identifier: id, digits: column == .duration || column == .number, secondary: album != nil && column != .duration)
+                ?? TextCell(identifier: id, digits: column == .duration || column == .number,
+                            secondary: column == .number || album != nil && column != .duration)
             cell.textField?.stringValue = switch column {
+            case .number where playlist != nil: "\(index + 1)"
             case .number: row.trackNo.map { multiDisc ? "\(LibraryIndex.disc(of: row))-\($0)" : "\($0)" } ?? ""
             case .title: row.title
             case .artist: row.artistText == album?.artist ? "" : row.artistText
@@ -174,6 +192,37 @@ struct SongsTableView: NSViewRepresentable {
             model.ui.songSelection = Set(table.selectedRowIndexes.map { rows[$0].id })
         }
 
+        // Dragging carries track ids; a playlist takes them back as a reorder when it shows all its tracks (no search / filter).
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+            let item = NSPasteboardItem()
+            item.setString(String(rows[row].id), forType: .trackID)
+            return item
+        }
+
+        private var reorderable: Bool {
+            playlist.flatMap { model.library?.playlist($0) }?.trackIDs == rows.map(\.id)
+        }
+
+        func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int,
+                       proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+            guard reorderable, info.draggingSource as? NSTableView === tableView else { return [] }
+            tableView.setDropRow(row, dropOperation: .above)
+            return .move
+        }
+
+        func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int,
+                       dropOperation: NSTableView.DropOperation) -> Bool {
+            guard reorderable, let playlist else { return false }
+            let ids = info.draggingPasteboard.pasteboardItems?.compactMap { $0.string(forType: .trackID).flatMap { Int64($0) } } ?? []
+            model.library?.movePlaylistTracks(playlist, Set(ids), to: row)
+            return true
+        }
+
+        func removeSelection() {
+            guard let playlist, let table else { return }
+            model.library?.removeFromPlaylist(playlist, Set(table.selectedRowIndexes.map { rows[$0].id }))
+        }
+
         @objc func doubleClicked(_ sender: NSTableView) { play(from: sender.clickedRow) }
         func playSelection() { play(from: table?.selectedRowIndexes.first ?? -1) }
 
@@ -188,28 +237,47 @@ struct SongsTableView: NSViewRepresentable {
             guard let table, rows.indices.contains(table.clickedRow) else { return }
             let indexes = table.selectedRowIndexes.contains(table.clickedRow) ? table.selectedRowIndexes : [table.clickedRow]
             let picked = indexes.map { rows[$0] }
-            let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
-            for (title, action) in [("播放下一首", #selector(playNext)), ("添加到队列", #selector(addToQueue)),
-                                    (allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked)), ("在访达中显示", #selector(reveal))] {
-                if action == #selector(toggleLiked) || action == #selector(reveal) { menu.addItem(.separator()) }
+            func add(_ title: String, _ action: Selector, to menu: NSMenu = menu, tag: Int = 0) {
                 let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
                 item.target = self
                 item.representedObject = picked
-                item.tag = allLiked ? 0 : 1   // what 喜欢 / 取消喜欢 sets
+                item.tag = tag
             }
+            add("播放下一首", #selector(playNext))
+            add("添加到队列", #selector(addToQueue))
+            let playlists = NSMenu()
+            add("新建播放列表…", #selector(addToNewPlaylist), to: playlists)
+            if let existing = model.library?.playlists, !existing.isEmpty {
+                playlists.addItem(.separator())
+                for playlist in existing { add(playlist.name, #selector(addToPlaylist), to: playlists, tag: Int(playlist.id)) }
+            }
+            menu.addItem(withTitle: "添加到播放列表", action: nil, keyEquivalent: "").submenu = playlists
+            menu.addItem(.separator())
+            if playlist != nil { add("从播放列表中移除", #selector(removeFromPlaylist)) }
+            let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
+            add(allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked), tag: allLiked ? 0 : 1)   // tag: what it sets
+            menu.addItem(.separator())
+            add("在访达中显示", #selector(reveal))
         }
 
         @objc private func playNext(_ item: NSMenuItem) { model.player?.playNext(picked(item).map(\.id)) }
         @objc private func addToQueue(_ item: NSMenuItem) { model.player?.addToQueue(picked(item).map(\.id)) }
+        @objc private func addToNewPlaylist(_ item: NSMenuItem) { model.promptNewPlaylist(picked(item).map(\.id)) }
+        @objc private func addToPlaylist(_ item: NSMenuItem) { model.library?.addToPlaylist(Int64(item.tag), picked(item).map(\.id)) }
+        @objc private func removeFromPlaylist(_ item: NSMenuItem) {
+            guard let playlist else { return }
+            model.library?.removeFromPlaylist(playlist, Set(picked(item).map(\.id)))
+        }
         @objc private func reveal(_ item: NSMenuItem) { revealInFinder(picked(item)) }
         @objc private func toggleLiked(_ item: NSMenuItem) { model.library?.setLiked(picked(item).map(\.id), item.tag == 1) }
         private func picked(_ item: NSMenuItem) -> [TrackRow] { item.representedObject as? [TrackRow] ?? [] }
     }
 }
 
-/// Return plays the selection, as double-click does.
+/// Return plays the selection, as double-click does; ⌫ removes it from a playlist.
 private final class TrackTable: NSTableView {
     var onReturn: (() -> Void)?
+    var onDelete: (() -> Void)?
     private var fitted = false
 
     /// Column autoresizing only spreads later width changes: a table first shown narrower than its columns would
@@ -222,10 +290,14 @@ private final class TrackTable: NSTableView {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty else {
-            return super.keyDown(with: event)
+        let action: (() -> Void)? = switch event.keyCode {
+        case 36, 76: onReturn
+        case 51, 117: onDelete
+        default: nil
         }
-        if !event.isARepeat { onReturn?() }
+        guard let action, event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad]).isEmpty
+        else { return super.keyDown(with: event) }
+        if !event.isARepeat { action() }
     }
 }
 
@@ -256,8 +328,8 @@ private final class TitleCell: NSTableCellView {
     private let note = NSImageView(image: NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)!)
     private let mark = NSImageView(image: NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "正在播放")!)
     private var loading: Task<Void, Never>?
-    /// The row whose cover is shown; a new file modification time means new art.
-    private var shown: (id: Int64, mtime: Double)?
+    /// The file whose cover is shown; a new modification time means new art.
+    private var shown: (path: String, mtime: Double)?
 
     var isPlaying = false {
         didSet { mark.isHidden = !isPlaying }
@@ -318,8 +390,8 @@ private final class TitleCell: NSTableCellView {
     func show(_ row: TrackRow, artwork: ArtworkStore, playing: Bool) {
         textField?.stringValue = row.title
         isPlaying = playing
-        guard !cover.isHidden, shown?.id != row.id || shown?.mtime != row.fileMtime else { return }
-        shown = (row.id, row.fileMtime)
+        guard !cover.isHidden, shown?.path != row.path || shown?.mtime != row.fileMtime else { return }
+        shown = (row.path, row.fileMtime)
         loading?.cancel()
         let pixels = CoverView.pixels(for: 28), box = artwork.box(row, pixels: pixels)
         setCover(box.image)
@@ -333,7 +405,7 @@ private final class TitleCell: NSTableCellView {
                 await artwork.load(box, row, pixels: pixels)
                 image = box.image
             }
-            guard !Task.isCancelled, let self, shown?.id == row.id else { return }
+            guard !Task.isCancelled, let self, shown?.path == row.path else { return }
             setCover(image)
         }
     }

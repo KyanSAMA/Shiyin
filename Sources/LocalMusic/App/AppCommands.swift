@@ -9,6 +9,10 @@ struct AppCommands: Commands {
 
     var body: some Commands {
         SidebarCommands()
+        CommandGroup(replacing: .newItem) {
+            Button("新建播放列表…") { model.promptNewPlaylist() }
+                .keyboardShortcut("n")
+        }
         CommandGroup(after: .textEditing) {
             Button("搜索") { model.searchFromMenu() }
                 .keyboardShortcut("f")

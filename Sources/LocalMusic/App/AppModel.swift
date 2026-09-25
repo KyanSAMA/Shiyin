@@ -26,13 +26,32 @@ struct LaunchOptions {
     var isSelfTest: Bool { selfTestScript != nil }
 }
 
-enum SidebarItem: String, Identifiable {
+enum SidebarItem: Hashable, Identifiable {
     case songs, albums, artists, composers, recent, liked
+    case playlist(Int64)
 
     static let library: [Self] = [.songs, .albums, .artists, .composers]
     static let presets: [Self] = [.recent, .liked]
 
     var id: Self { self }
+
+    /// Self-test names of the fixed items.
+    init?(name: String) {
+        guard let item = (Self.library + Self.presets).first(where: { $0.name == name }) else { return nil }
+        self = item
+    }
+
+    var name: String {
+        switch self {
+        case .songs: "songs"
+        case .albums: "albums"
+        case .artists: "artists"
+        case .composers: "composers"
+        case .recent: "recent"
+        case .liked: "liked"
+        case .playlist: "playlist"
+        }
+    }
 
     var title: String {
         switch self {
@@ -42,6 +61,7 @@ enum SidebarItem: String, Identifiable {
         case .composers: "作曲"
         case .recent: "最近添加"
         case .liked: "喜欢的歌曲"
+        case .playlist: "播放列表"
         }
     }
 
@@ -53,8 +73,18 @@ enum SidebarItem: String, Identifiable {
         case .composers: "pianokeys"
         case .recent: "clock"
         case .liked: "heart"
+        case .playlist: "music.note.list"
         }
     }
+}
+
+/// The name field of the new / rename playlist dialog.
+enum PlaylistPrompt {
+    case create([Int64])
+    case rename(Int64)
+
+    var title: String { if case .rename = self { "重命名播放列表" } else { "新建播放列表" } }
+    var action: String { if case .rename = self { "重命名" } else { "创建" } }
 }
 
 enum Route: Hashable {
@@ -75,6 +105,9 @@ enum Route: Hashable {
     var queueShown = false
     var filter = TrackFilter()
     var personSelection: [PersonRole: String] = [:]
+    var playlistPrompt: PlaylistPrompt?
+    var playlistName = ""
+    var deletingPlaylist: Int64?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var filteredMemo: (index: UUID, search: String, filter: TrackFilter, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
     @ObservationIgnored private var matchesMemo: (index: UUID, filter: TrackFilter, ids: Set<Int64>?)?
@@ -115,6 +148,13 @@ enum Route: Hashable {
             .sorted { $0.1 > $1.1 }
             .prefix(100)
             .map(\.0)
+    }
+
+    /// `rows` narrowed by the search field and filter, order kept.
+    func narrowed(_ rows: [TrackRow], in index: LibraryIndex) -> [TrackRow] {
+        var rows = index.filter(rows, matching: search)
+        if let ids = matches(in: index) { rows.removeAll { !ids.contains($0.id) } }
+        return rows
     }
 
     func likedSongs(in index: LibraryIndex, liked: [Int64: Date]) -> [TrackRow] {
@@ -225,6 +265,39 @@ enum Route: Hashable {
     func showMainWindow() {
         NSApp.activate()
         ui.openWindow?(id: "main")
+    }
+
+    /// Asks for a name; an empty playlist is then opened, one made from songs is not.
+    func promptNewPlaylist(_ tracks: [Int64] = []) {
+        showMainWindow()
+        ui.playlistName = ""
+        ui.playlistPrompt = .create(tracks)
+    }
+
+    func promptRenamePlaylist(_ playlist: Playlist) {
+        ui.playlistName = playlist.name
+        ui.playlistPrompt = .rename(playlist.id)
+    }
+
+    func commitPlaylistPrompt(_ prompt: PlaylistPrompt) {
+        guard let library else { return }
+        let name = ui.playlistName.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch prompt {
+        case .create(let tracks):
+            Task {
+                guard let playlist = await library.createPlaylist(name.isEmpty ? "未命名播放列表" : name, tracks: tracks), tracks.isEmpty
+                else { return }
+                ui.sidebar = .playlist(playlist.id)
+                ui.path = []
+            }
+        case .rename(let id):
+            if !name.isEmpty { library.renamePlaylist(id, name) }
+        }
+    }
+
+    func deletePlaylist(_ id: Int64) {
+        if ui.sidebar == .playlist(id) { ui.sidebar = .songs }
+        library?.deletePlaylist(id)
     }
 
     /// ⌘F: unlike `UIState.focusSearch`, also brings the library window forward (e.g. from Settings).

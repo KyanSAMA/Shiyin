@@ -1,0 +1,12 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "library.scanning", "equals": false, "timeout": 10 },
+    { "do": "assert", "path": "library.playlists.0.name", "equals": "晚上" },
+    { "do": "assert", "path": "library.playlists.0.titles", "equals": ["群青", "春日影"] },
+    { "do": "sidebar", "value": "playlist", "name": "晚上" },
+    { "do": "assert", "path": "ui.firstRows", "equals": ["群青", "春日影"] }
+  ]
+}

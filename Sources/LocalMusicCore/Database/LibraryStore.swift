@@ -141,6 +141,53 @@ public actor LibraryStore {
         }
     }
 
+    // MARK: Playlists
+
+    public func playlists() throws -> [Playlist] {
+        let items = Dictionary(grouping: try db.query("SELECT playlist_id, track_id FROM playlist_item ORDER BY playlist_id, pos") {
+            ($0.int64(0)!, $0.int64(1)!)
+        }, by: \.0)
+        return try db.query("SELECT id, name FROM playlist ORDER BY ord, id") {
+            let id = $0.int64(0)!
+            return Playlist(id: id, name: $0.string(1)!, trackIDs: items[id]?.map(\.1) ?? [])
+        }
+    }
+
+    /// Appended after the existing playlists.
+    public func createPlaylist(_ name: String, tracks: [Int64]) throws -> Playlist {
+        try db.transaction {
+            try db.run("INSERT INTO playlist(name, created_at, ord) SELECT ?, ?, COALESCE(MAX(ord), 0) + 1 FROM playlist",
+                       [name, Date().timeIntervalSince1970])
+            let id = db.lastInsertRowID
+            return Playlist(id: id, name: name, trackIDs: try replaceItems(id, tracks))
+        }
+    }
+
+    public func renamePlaylist(_ id: Int64, _ name: String) throws {
+        try db.run("UPDATE playlist SET name = ? WHERE id = ?", [name, id])
+    }
+
+    public func deletePlaylist(_ id: Int64) throws {
+        try db.run("DELETE FROM playlist WHERE id = ?", [id])
+    }
+
+    /// Replaces the playlist's contents, skipping repeats and tracks a scan removed meanwhile; returns what was stored.
+    @discardableResult
+    public func setPlaylistTracks(_ id: Int64, _ tracks: [Int64]) throws -> [Int64] {
+        try db.transaction { try replaceItems(id, tracks) }
+    }
+
+    private func replaceItems(_ id: Int64, _ tracks: [Int64]) throws -> [Int64] {
+        try db.run("DELETE FROM playlist_item WHERE playlist_id = ?", [id])
+        let insert = try db.prepare("""
+            INSERT OR IGNORE INTO playlist_item(playlist_id, pos, track_id)
+            SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM track WHERE id = ?)
+            """)
+        var seen = Set<Int64>()
+        for track in tracks where seen.insert(track).inserted { try insert.run([id, seen.count, track, track]) }
+        return try db.query("SELECT track_id FROM playlist_item WHERE playlist_id = ? ORDER BY pos", [id]) { $0.int64(0)! }
+    }
+
     // MARK: Loudness
 
     /// Tracks without a loudness row for their current file stamp and analyzer version.

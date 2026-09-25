@@ -114,6 +114,29 @@ struct LibraryScannerTests {
         #expect(try await lib.store.liked().isEmpty)
     }
 
+    @Test func playlistsKeepOrderAndFollowTrackRemoval() async throws {
+        let lib = try TempLibrary()
+        for title in ["A", "B", "C"] { try lib.flac("\(title).flac", ["TITLE=\(title)"]) }
+        _ = try await lib.scan()
+        let ids = Dictionary(uniqueKeysWithValues: try await lib.store.rows().map { ($0.title, $0.id) })
+        let (a, b, c) = (ids["A"]!, ids["B"]!, ids["C"]!)
+
+        let first = try await lib.store.createPlaylist("一", tracks: [c, a, c, 999])
+        #expect(first.trackIDs == [c, a])
+        let second = try await lib.store.createPlaylist("二", tracks: [])
+        try await lib.store.setPlaylistTracks(first.id, [a, b, c])
+        try await lib.store.renamePlaylist(second.id, "Two")
+        #expect(try await lib.store.playlists() == [Playlist(id: first.id, name: "一", trackIDs: [a, b, c]),
+                                                    Playlist(id: second.id, name: "Two", trackIDs: [])])
+
+        try FileManager.default.removeItem(at: lib.root.appending(path: "B.flac"))
+        _ = try await lib.scan()
+        #expect(try await lib.store.playlists()[0].trackIDs == [a, c])
+        try await lib.store.deletePlaylist(first.id)
+        #expect(try await lib.store.playlists().map(\.name) == ["Two"])
+        #expect(try await lib.count("SELECT COUNT(*) FROM playlist_item") == 0)
+    }
+
     @Test func sidecarLyricsMarkTheTrackDirty() async throws {
         let lib = try TempLibrary()
         try lib.flac("Song.flac", ["TITLE=Song"])

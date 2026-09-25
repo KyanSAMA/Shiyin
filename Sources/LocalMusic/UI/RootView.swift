@@ -51,6 +51,20 @@ struct RootView: View {
             Divider()
             PlayerBarView()
         }
+        .alert(ui.playlistPrompt?.title ?? "",
+               isPresented: Binding(get: { ui.playlistPrompt != nil }, set: { if !$0 { ui.playlistPrompt = nil } }),
+               presenting: ui.playlistPrompt) { prompt in
+            TextField("名称", text: $ui.playlistName)
+            Button("取消", role: .cancel) {}
+            Button(prompt.action) { model.commitPlaylistPrompt(prompt) }.keyboardShortcut(.defaultAction)
+        }
+        .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",
+                            isPresented: Binding(get: { ui.deletingPlaylist != nil }, set: { if !$0 { ui.deletingPlaylist = nil } }),
+                            titleVisibility: .visible, presenting: ui.deletingPlaylist) { id in
+            Button("删除", role: .destructive) { model.deletePlaylist(id) }
+        } message: { _ in
+            Text("歌曲文件不会被删除。")
+        }
         .frame(minWidth: 900, minHeight: 560)
         .transaction { if !ui.animationsEnabled { $0.disablesAnimations = true; $0.animation = nil } }
         .task {
@@ -73,16 +87,39 @@ struct SidebarView: View {
         })) {
             ForEach([("资料库", SidebarItem.library), ("精选", SidebarItem.presets)], id: \.0) { title, items in
                 Section(title) {
-                    ForEach(items) { item in
-                        Label(item.title, systemImage: item.symbol)
-                            .tag(item)
-                            // Re-clicking the selected item doesn't reach the selection setter; still pop to its root.
-                            .simultaneousGesture(TapGesture().onEnded { if ui.sidebar == item { ui.path = [] } })
+                    ForEach(items) { row(item: $0, title: $0.title) }
+                }
+            }
+            if let playlists = model.library?.playlists, !playlists.isEmpty {
+                Section("播放列表") {
+                    ForEach(playlists) { playlist in
+                        row(item: .playlist(playlist.id), title: playlist.name)
+                            .contextMenu {
+                                Button("重命名…") { model.promptRenamePlaylist(playlist) }
+                                Button("删除播放列表…") { ui.deletingPlaylist = playlist.id }
+                            }
                     }
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            Button { model.promptNewPlaylist() } label: {
+                Label("新建播放列表", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+        }
         .navigationSplitViewColumnWidth(min: 180, ideal: 210)
+    }
+
+    private func row(item: SidebarItem, title: String) -> some View {
+        let ui = model.ui
+        return Label(title, systemImage: item.symbol)
+            .tag(item)
+            // Re-clicking the selected item doesn't reach the selection setter; still pop to its root.
+            .simultaneousGesture(TapGesture().onEnded { if ui.sidebar == item { ui.path = [] } })
     }
 }
 
@@ -117,6 +154,12 @@ struct DetailView: View {
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
                     Results(ui: ui, isEmpty: groups.isEmpty) { PeopleBrowser(groups: groups, role: role, index: index) }
+                case .playlist(let id):
+                    if let playlist = library.playlist(id) {
+                        PlaylistView(playlist: playlist, index: index)
+                    } else {
+                        ContentUnavailableView("播放列表已删除", systemImage: "music.note.list").frame(maxHeight: .infinity)
+                    }
                 }
             }
         } else if let library = model.library, library.scanning || !library.started {
@@ -134,7 +177,7 @@ struct DetailView: View {
 }
 
 /// Stands in for a list the search or filter left empty.
-private struct Results<Content: View>: View {
+struct Results<Content: View>: View {
     let ui: UIState
     let isEmpty: Bool
     @ViewBuilder let content: Content

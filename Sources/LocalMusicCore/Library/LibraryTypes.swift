@@ -26,6 +26,19 @@ public struct LibraryRoots: Sendable, Equatable {
     }
 }
 
+/// A user playlist; each track appears at most once.
+public struct Playlist: Sendable, Identifiable, Hashable {
+    public let id: Int64
+    public var name: String
+    public var trackIDs: [Int64]
+
+    public init(id: Int64, name: String, trackIDs: [Int64]) {
+        self.id = id
+        self.name = name
+        self.trackIDs = trackIDs
+    }
+}
+
 public struct TrackRow: Sendable, Identifiable, Hashable {
     public let id: Int64
     public let path: String

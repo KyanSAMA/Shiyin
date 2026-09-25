@@ -14,6 +14,11 @@ struct AlbumsGrid: View {
                         AlbumTile(store: model.artwork, album: album, cover: album.coverTrackID.flatMap { index.tracks[$0] })
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("播放下一首") { model.player?.playNext(album.trackIDs) }
+                        Button("添加到队列") { model.player?.addToQueue(album.trackIDs) }
+                        AddToPlaylistMenu(model: model, tracks: album.trackIDs)
+                    }
                 }
             }
             .padding(24)

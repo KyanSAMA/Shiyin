@@ -18,6 +18,7 @@ struct QueueView: View {
                     QueueRow(store: model.artwork, row: tracks[entry.trackID])
                         .contextMenu {
                             Button("从队列中移除") { player.remove([entry.id]) }
+                            AddToPlaylistMenu(model: model, tracks: [entry.trackID])
                             if let row = tracks[entry.trackID] { Button("在访达中显示") { revealInFinder([row]) } }
                         }
                 }
@@ -55,6 +56,22 @@ private struct QueueRow: View {
                 Text(row?.artistText ?? "").font(.system(size: 10)).foregroundStyle(.secondary)
             }
             .lineLimit(1)
+        }
+    }
+}
+
+/// 添加到播放列表 ▸ for SwiftUI context menus.
+struct AddToPlaylistMenu: View {
+    let model: AppModel
+    let tracks: [Int64]
+
+    var body: some View {
+        Menu("添加到播放列表") {
+            Button("新建播放列表…") { model.promptNewPlaylist(tracks) }
+            if let library = model.library, !library.playlists.isEmpty {
+                Divider()
+                ForEach(library.playlists) { playlist in Button(playlist.name) { library.addToPlaylist(playlist.id, tracks) } }
+            }
         }
     }
 }

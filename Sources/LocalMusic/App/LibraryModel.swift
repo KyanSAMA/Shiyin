@@ -10,6 +10,7 @@ import LocalMusicCore
     private(set) var lastScan: ScanReport?
     private(set) var lastError: String?
     private(set) var liked: [Int64: Date] = [:]
+    private(set) var playlists: [Playlist] = []
 
     @ObservationIgnored private let store: LibraryStore
     @ObservationIgnored private var watchTask: Task<Void, Never>?
@@ -31,6 +32,7 @@ import LocalMusicCore
             if let override { try await store.setRoots(override) }
             roots = try await store.roots()
             liked = try await store.liked()
+            playlists = try await store.playlists()
             try await reload()
         } catch {
             lastError = String(describing: error)
@@ -101,6 +103,65 @@ import LocalMusicCore
         write { try await $0.setLiked(ids, on) }
     }
 
+    func playlist(_ id: Int64) -> Playlist? { playlists.first { $0.id == id } }
+
+    /// Returns once stored: the id comes from the store.
+    func createPlaylist(_ name: String, tracks: [Int64]) async -> Playlist? {
+        let store = store
+        let create = Task.detached { [previous = writes] in
+            await previous?.value
+            return try await store.createPlaylist(name, tracks: tracks)
+        }
+        writes = Task.detached { _ = try? await create.value }
+        do {
+            let playlist = try await create.value
+            playlists.append(playlist)
+            return playlist
+        } catch {
+            lastError = String(describing: error)
+            return nil
+        }
+    }
+
+    func renamePlaylist(_ id: Int64, _ name: String) {
+        guard let i = playlists.firstIndex(where: { $0.id == id }) else { return }
+        playlists[i].name = name
+        write { try await $0.renamePlaylist(id, name) }
+    }
+
+    func deletePlaylist(_ id: Int64) {
+        playlists.removeAll { $0.id == id }
+        write { try await $0.deletePlaylist(id) }
+    }
+
+    /// Tracks already in the playlist keep their place.
+    func addToPlaylist(_ id: Int64, _ tracks: [Int64]) {
+        guard let playlist = playlist(id) else { return }
+        setTracks(id, playlist.trackIDs + tracks)
+    }
+
+    func removeFromPlaylist(_ id: Int64, _ tracks: Set<Int64>) {
+        guard let playlist = playlist(id) else { return }
+        setTracks(id, playlist.trackIDs.filter { !tracks.contains($0) })
+    }
+
+    /// Moves `tracks` together, in playlist order, to before position `target` (as counted before the move).
+    func movePlaylistTracks(_ id: Int64, _ tracks: Set<Int64>, to target: Int) {
+        guard let ids = playlist(id)?.trackIDs else { return }
+        let target = min(max(target, 0), ids.count)
+        let rest = { (slice: ArraySlice<Int64>) in slice.filter { !tracks.contains($0) } }
+        setTracks(id, rest(ids[..<target]) + ids.filter(tracks.contains) + rest(ids[target...]))
+    }
+
+    private func setTracks(_ id: Int64, _ tracks: [Int64]) {
+        guard let i = playlists.firstIndex(where: { $0.id == id }) else { return }
+        var seen = Set<Int64>()
+        let unique = tracks.filter { index.tracks[$0] != nil && seen.insert($0).inserted }   // as the store keeps them
+        guard unique != playlists[i].trackIDs else { return }
+        playlists[i].trackIDs = unique
+        write { try await $0.setPlaylistTracks(id, unique) }
+    }
+
     /// Store writes run one after another, in call order, off the main actor so a quit can wait for them.
     private func write(_ body: @escaping @Sendable (LibraryStore) async throws -> Void) {
         let store = store
@@ -128,7 +189,9 @@ import LocalMusicCore
     private func reload() async throws {
         let rows = try await store.rows()
         index = await Task.detached { LibraryIndex(rows: rows) }.value
-        liked = liked.filter { index.tracks[$0.key] != nil }   // the store dropped removed tracks' likes itself
+        // The store dropped removed tracks' likes and playlist entries itself.
+        liked = liked.filter { index.tracks[$0.key] != nil }
+        for i in playlists.indices { playlists[i].trackIDs.removeAll { index.tracks[$0] == nil } }
         onReload?()
     }
 

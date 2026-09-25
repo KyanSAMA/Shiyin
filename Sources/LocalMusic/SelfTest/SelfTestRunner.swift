@@ -83,8 +83,12 @@ final class SelfTestRunner {
             try await settle()
         case "sidebar":
             let value = try step.required("value")
-            guard let item = SidebarItem(rawValue: value) else { throw SelfTestFailure(description: "unknown sidebar \(value)") }
-            model.ui.sidebar = item
+            if value == "playlist" {
+                model.ui.sidebar = .playlist(try playlist(step.required("name")).id)
+            } else {
+                guard let item = SidebarItem(name: value) else { throw SelfTestFailure(description: "unknown sidebar \(value)") }
+                model.ui.sidebar = item
+            }
             model.ui.path = []
             try await settle()
         case "search":
@@ -147,6 +151,27 @@ final class SelfTestRunner {
             try await library().scan()
         case "fs":
             try fileOperation(step)
+        case "promptPlaylist":
+            if let name = step.string("rename") { model.promptRenamePlaylist(try playlist(name)) } else { model.promptNewPlaylist(try trackIDs(step)) }
+            try await settle()
+        case "commitPlaylistPrompt":
+            guard let prompt = model.ui.playlistPrompt else { throw SelfTestFailure(description: "no playlist prompt") }
+            model.ui.playlistName = step.string("name") ?? model.ui.playlistName
+            model.ui.playlistPrompt = nil
+            model.commitPlaylistPrompt(prompt)
+            try await settle()
+        case "addToPlaylist":
+            try library().addToPlaylist(try playlist(step.required("name")).id, try trackIDs(step))
+            try await settle()
+        case "removeFromPlaylist":
+            try library().removeFromPlaylist(try playlist(step.required("name")).id, Set(try trackIDs(step)))
+            try await settle()
+        case "movePlaylistTracks":
+            try library().movePlaylistTracks(try playlist(step.required("name")).id, Set(try trackIDs(step)), to: Int(step.number("to") ?? 0))
+            try await settle()
+        case "deletePlaylist":
+            model.deletePlaylist(try playlist(step.required("name")).id)
+            try await settle()
         case "like":
             let library = try library()
             let ids = try step.string("title").map { title in library.index.songs.filter { $0.title == title }.map(\.id) }
@@ -298,6 +323,20 @@ final class SelfTestRunner {
         } ?? []
     }
 
+    private func playlist(_ name: String) throws -> Playlist {
+        guard let playlist = try library().playlists.first(where: { $0.name == name }) else { throw SelfTestFailure(description: "no playlist \(name)") }
+        return playlist
+    }
+
+    /// Ids of the songs titled in `titles`, in that order.
+    private func trackIDs(_ step: Step) throws -> [Int64] {
+        let songs = try library().index.songs
+        return try (step["titles"] as? [String] ?? []).map { title in
+            guard let song = songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
+            return song.id
+        }
+    }
+
     /// The person the artists / composers page shows.
     private func personState() -> Any {
         let ui = model.ui
@@ -322,6 +361,8 @@ final class SelfTestRunner {
             case .albums: return ui.albums(in: index).map(\.title)
             case .recent: return ui.recentAlbums(in: index).map(\.title)
             case .liked: return ui.likedSongs(in: index, liked: model.library?.liked ?? [:]).map(\.title)
+            case .playlist(let id):
+                return ui.narrowed(model.library?.playlist(id)?.trackIDs.compactMap { index.tracks[$0] } ?? [], in: index).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)
             case .composers: return ui.people(.composer, in: index).map(\.name)
             }
@@ -486,11 +527,13 @@ final class SelfTestRunner {
         return [
             "app": ["dataDir": model.paths.data.path, "startupError": model.startupError as Any? ?? NSNull(),
                     "storeOpen": model.library != nil, "isActive": NSApp.isActive],
-            "ui": ["sidebar": model.ui.sidebar.rawValue, "search": model.ui.search, "depth": model.ui.path.count,
+            "ui": ["sidebar": model.ui.sidebar.name, "search": model.ui.search, "depth": model.ui.path.count,
                    "filterChips": model.ui.filter.chips.map { [$0.dimension, $0.value].compactMap { $0 }.joined(separator: " ") },
                    "searchFocused": mainWindow?.firstResponder is NSText, "nowPlaying": model.ui.nowPlayingShown,
                    "sort": model.ui.songSort.first.map { "\(SongColumn($0)?.rawValue ?? "?")\($0.order == .forward ? "+" : "-")" } ?? "",
                    "selectionCount": model.ui.songSelection.count, "person": personState(),
+                   "playlistPrompt": model.ui.playlistPrompt?.title ?? NSNull(),
+                   "playlist": { if case .playlist(let id) = model.ui.sidebar { model.library?.playlist(id)?.name } else { nil } }() ?? NSNull(),
                    "visibleCount": visible.count, "firstRows": Array(visible.prefix(5))] as Step,
             "windows": ["main": main, "mini": miniState(), "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
@@ -520,6 +563,7 @@ final class SelfTestRunner {
             "artistCount": index.artists.count, "composerCount": index.composers.count,
             "firstSongs": index.songs.prefix(5).map(\.title),
             "liked": library.liked.keys.compactMap { index.tracks[$0]?.title }.sorted(),
+            "playlists": library.playlists.map { ["name": $0.name, "titles": $0.trackIDs.compactMap { index.tracks[$0]?.title }] as Step },
             "roots": ["include": library.roots.include, "exclude": library.roots.exclude],
             "lastScan": library.lastScan.map {
                 ["total": $0.total, "parsed": $0.parsed, "added": $0.added, "updated": $0.updated, "removed": $0.removed,

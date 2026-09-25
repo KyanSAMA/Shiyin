@@ -51,7 +51,10 @@ private struct PersonPane: View {
             // Album by album, the way the grid reads.
             let tracks = albums.flatMap { $0.trackIDs.filter(ids.contains) }
             ScrollView {
-                header(detail: "\(albums.count) 张专辑 · " + summary(count: rows.count, seconds: seconds), tracks: tracks)
+                VStack(spacing: 0) {
+                    PageHeader(title: group.name, detail: "\(albums.count) 张专辑 · " + summary(count: rows.count, seconds: seconds), tracks: tracks)
+                    Divider().padding(.horizontal, 24).padding(.bottom, 20)
+                }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 22)], spacing: 26) {
                     ForEach(albums) { album in
                         NavigationLink(value: Route.album(album.id)) {
@@ -66,32 +69,9 @@ private struct PersonPane: View {
         } else {
             let sorted = rows.sorted(using: model.ui.songSort)
             VStack(spacing: 0) {
-                header(detail: summary(count: rows.count, seconds: seconds), tracks: sorted.map(\.id))
+                PageHeader(title: group.name, detail: summary(count: rows.count, seconds: seconds), tracks: sorted.map(\.id))
                 SongsTableView(model: model, rows: sorted)
             }
-        }
-    }
-
-    private func header(detail: String, tracks: [Int64]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(group.name).font(.system(size: 26, weight: .bold)).lineLimit(1)
-                    Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 16)
-                HStack(spacing: 10) {
-                    Button { model.player?.play(tracks, startAt: 0, shuffle: false) } label: { Label("播放", systemImage: "play.fill") }
-                    Button { model.player?.shufflePlay(tracks) } label: { Label("随机播放", systemImage: "shuffle") }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .controlSize(.large)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 18)
-            if role == .artist { Divider().padding(.horizontal, 24).padding(.bottom, 20) }
         }
     }
 }
