@@ -23,7 +23,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - Table 单元格等深层视图不用 `@Environment(AppModel.self)`（排序重建行时会查不到而崩溃），由表格层取出后显式传参（如 `CoverView(store:)`、`PlayingMark(player:)`）
 - UI 文案中文硬编码（SwiftPM 打包的 .app 不带资源 bundle）
 - 自建窗口（迷你播放器面板）里的 `NSHostingView` 不能直接当 `contentView`：即使 `sizingOptions = []`，它仍会在 `windowDidLayout` 里按内容理想尺寸（含标题栏安全区）改窗口大小；作为子视图加 autoresizing 即可
-- 按键：空格播放 / 暂停和「编辑文本时 ⌘ 方向键交给输入框」都在 `AppModel.handleKey`（本地按键监听，先于菜单快捷键）：无修饰键的菜单快捷键会吞掉搜索框里的空格，⌘←→ 菜单项会抢走光标移动
+- 按键：空格播放 / 暂停和「编辑文本时 ⌘ 方向键交给输入框」都在 `AppModel.handleKey`（本地按键监听，先于菜单快捷键）：无修饰键的菜单快捷键会吞掉搜索框里的空格，⌘←→ 菜单项会抢走光标移动（直接调输入框的 `keyDown`；前台 App 里 `window.sendEvent` 仍会匹配菜单快捷键）
 - 退出时 `.terminateLater` 期间主线程跑的是不执行 MainActor 任务的 run loop 模式，异步保存会卡死退出：`applicationWillTerminate` 里交给 store actor 并用信号量等待（≤2 s）
 - SwiftUI 列表性能（`SelfTests/13-real-perf.json` 实测）：内容整体换掉的 `Table` / `List`（换排序、搜索、筛选、艺人↔作曲）用 `.id` 重建而不是 diff（diff 会逐行动画并重新量行高，排序 1.4 s）；隐藏的 inspector 仍保留内容，队列视图只在显示时构建（否则开播 322 首时排版全部队列行，~600 ms）；工具栏项放在不随导航推入 / 弹出变化的层级（每次增删工具栏项 ~100 ms）；SwiftUI `Table` 每个可见单元格一个托管视图、逐个量行高，新建一张就要 130–230 ms，所以歌曲表 / 专辑曲目表是 AppKit `NSTableView`（`SongsTableView`，固定行高、单元格复用、换数据只 `reloadData`）
 - `Commands` 菜单只在打开时重读模型状态，且禁用的菜单项仍会吞掉自己的快捷键：带快捷键的菜单项不按动态状态禁用，由动作本身判断

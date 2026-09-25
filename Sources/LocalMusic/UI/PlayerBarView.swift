@@ -43,9 +43,12 @@ private struct NowPlayingSummary: View {
             .disabled(player.current == nil)
             .help("播放页")
             VStack(alignment: .leading, spacing: 2) {
-                Text(player.current?.title ?? "未在播放")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(player.current == nil ? .secondary : .primary)
+                HStack(spacing: 2) {
+                    Text(player.current?.title ?? "未在播放")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(player.current == nil ? .secondary : .primary)
+                    if let library, let current = player.current { LikeButton(library: library, track: current.id, size: 11, side: 20) }
+                }
                 if let notice = player.skipNotice {
                     Label(notice, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -57,8 +60,6 @@ private struct NowPlayingSummary: View {
                 }
             }
             .lineLimit(1)
-            Spacer(minLength: 0)
-            if let library, let current = player.current { LikeButton(library: library, track: current.id) }
         }
     }
 }
@@ -66,13 +67,15 @@ private struct NowPlayingSummary: View {
 struct LikeButton: View {
     let library: LibraryModel
     let track: Int64
+    var size: CGFloat = 14
+    var side: CGFloat = 30
 
     var body: some View {
         let liked = library.liked[track] != nil
         Button { library.setLiked([track], !liked) } label: {
-            Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.fill" : "heart").font(.system(size: 14))
+            Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.fill" : "heart").font(.system(size: size))
         }
-        .buttonStyle(IconButtonStyle(side: 30))
+        .buttonStyle(IconButtonStyle(side: side))
         .foregroundStyle(liked ? AnyShapeStyle(.pink) : AnyShapeStyle(.secondary))
         .help(liked ? "取消喜欢" : "喜欢")
     }

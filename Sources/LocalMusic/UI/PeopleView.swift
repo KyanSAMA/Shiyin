@@ -7,13 +7,19 @@ struct PeopleBrowser: View {
     let groups: [PersonGroup]
     let role: PersonRole
     let index: LibraryIndex
+    @FocusState private var listFocused: Bool
 
     var body: some View {
         let ui = model.ui
         let selected = ui.selectedPerson(role, in: groups)
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
-                List(groups, selection: Binding(get: { selected?.id }, set: { if let id = $0 { ui.personSelection[role] = id } })) { group in
+                // Picking a person keeps the keyboard here (a click alone may not), so ↑ / ↓ go on through the list.
+                List(groups, selection: Binding(get: { selected?.id }, set: {
+                    guard let id = $0 else { return }
+                    ui.personSelection[role] = id
+                    listFocused = true
+                })) { group in
                     HStack(spacing: 10) {
                         CoverView(store: model.artwork, row: group.trackIDs.lazy.compactMap { index.tracks[$0] }.first(where: \.hasCover),
                                   size: 34, radius: 17)
@@ -21,6 +27,7 @@ struct PeopleBrowser: View {
                     }
                     .padding(.vertical, 2)
                 }
+                .focused($listFocused)
                 // Rebuilt lists open at the top.
                 .onAppear { if let id = selected?.id { proxy.scrollTo(id, anchor: .center) } }
             }

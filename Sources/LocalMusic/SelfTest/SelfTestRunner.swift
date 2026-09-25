@@ -231,6 +231,15 @@ final class SelfTestRunner {
                 window.sendEvent(unhandled)
             }
             try await settle()
+        case "focusList":
+            // The SwiftUI list right of the sidebar (e.g. the people list) takes the keyboard.
+            let window = try window()
+            guard let list = tables(window.contentView).filter({ !($0.delegate is SongsTableView.Coordinator) })
+                .max(by: { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }) else {
+                throw SelfTestFailure(description: "no list")
+            }
+            window.makeFirstResponder(list)
+            try await settle()
         case "setVolume":
             try player().setVolume(Float(step.number("value") ?? 1))
         case "quit":
@@ -269,6 +278,11 @@ final class SelfTestRunner {
         default:
             throw SelfTestFailure(description: "unknown action")
         }
+    }
+
+    private func tables(_ view: NSView?) -> [NSTableView] {
+        guard let view else { return [] }
+        return (view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
     }
 
     private func keyEvent(_ step: Step) throws -> NSEvent {

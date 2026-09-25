@@ -247,9 +247,9 @@ enum Route: Hashable {
     func handleKey(_ event: NSEvent) -> NSEvent? {
         guard let window = event.window else { return event }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
-        if window.firstResponder is NSText {
+        if let text = window.firstResponder as? NSText {
             guard modifiers == .command, (123...126).contains(event.keyCode) else { return event }
-            window.sendEvent(event)
+            text.keyDown(with: event)   // not window.sendEvent: in the active app that still matches menu key equivalents
             return nil
         }
         guard event.keyCode == 49, modifiers.isEmpty, window.isLibraryWindow, let player, player.queue.current != nil else { return event }

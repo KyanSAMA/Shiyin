@@ -3,12 +3,13 @@ import SwiftUI
 import LocalMusicCore
 
 enum SongColumn: String, CaseIterable {
-    case number, title, artist, album, year, duration, added
+    case number, title, liked, artist, album, year, duration, added
 
     var header: String {
         switch self {
         case .number: "#"
         case .title: "标题"
+        case .liked: ""
         case .artist: "艺人"
         case .album: "专辑"
         case .year: "年份"
@@ -20,7 +21,7 @@ enum SongColumn: String, CaseIterable {
     /// nil: not sortable.
     func comparator(_ order: SortOrder) -> KeyPathComparator<TrackRow>? {
         switch self {
-        case .number: nil
+        case .number, .liked: nil
         case .title: KeyPathComparator(\.title, comparator: .localizedStandard, order: order)
         case .artist: KeyPathComparator(\.artistText, comparator: .localizedStandard, order: order)
         case .album: KeyPathComparator(\.albumTitle, comparator: .localizedStandard, order: order)
@@ -59,9 +60,9 @@ struct SongsTableView: NSViewRepresentable {
         table.allowsMultipleSelection = true
         table.rowHeight = 36
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        let columns: [SongColumn] = if album != nil { [.number, .title, .artist, .duration] }
-            else if playlist != nil { [.number, .title, .artist, .album, .duration] }
-            else { [.title, .artist, .album, .year, .duration, .added] }
+        let columns: [SongColumn] = if album != nil { [.number, .title, .liked, .artist, .duration] }
+            else if playlist != nil { [.number, .title, .liked, .artist, .album, .duration] }
+            else { [.title, .liked, .artist, .album, .year, .duration, .added] }
         for column in columns {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = column.header
@@ -69,11 +70,13 @@ struct SongsTableView: NSViewRepresentable {
                 tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: column.rawValue, ascending: true)
             }
             switch column {
+            case .liked: tableColumn.resizingMask = []
             case .number, .year, .duration, .added: tableColumn.resizingMask = .userResizingMask   // extra width goes to text columns
             default: break
             }
             switch column {
             case .number: tableColumn.width = 36
+            case .liked: tableColumn.width = 18
             case .title: (tableColumn.minWidth, tableColumn.width) = (160, album == nil ? 320 : 420)
             case .artist, .album: (tableColumn.minWidth, tableColumn.width) = (80, 200)
             case .year: tableColumn.width = 44
@@ -108,7 +111,8 @@ struct SongsTableView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         let ui = model.ui
         context.coordinator.update(rows: rows, album: album, playlist: playlist, selection: ui.songSelection,
-                                   sort: album == nil && playlist == nil ? ui.songSort.first : nil, playing: model.player?.current?.id)
+                                   sort: album == nil && playlist == nil ? ui.songSort.first : nil, playing: model.player?.current?.id,
+                                   liked: model.library?.liked ?? [:])
     }
 
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
@@ -119,6 +123,7 @@ struct SongsTableView: NSViewRepresentable {
         private var playlist: Int64?
         private var multiDisc = false
         private var playing: Int64?
+        private var liked: [Int64: Date] = [:]
         /// Set while the model pushes state into the table, so the table's callbacks don't echo it back.
         private var applying = false
 
@@ -127,7 +132,7 @@ struct SongsTableView: NSViewRepresentable {
         }
 
         func update(rows: [TrackRow], album: AlbumGroup?, playlist: Int64?, selection: Set<Int64>, sort: KeyPathComparator<TrackRow>?,
-                    playing: Int64?) {
+                    playing: Int64?, liked: [Int64: Date]) {
             guard let table else { return }
             applying = true
             defer { applying = false }
@@ -138,7 +143,15 @@ struct SongsTableView: NSViewRepresentable {
                 self.playlist = playlist
                 multiDisc = album != nil && Set(rows.map(LibraryIndex.disc)).count > 1
                 self.playing = playing
+                self.liked = liked
                 table.reloadData()
+            }
+            if liked.keys != self.liked.keys {
+                self.liked = liked
+                let column = table.column(withIdentifier: NSUserInterfaceItemIdentifier(SongColumn.liked.rawValue))
+                table.enumerateAvailableRowViews { view, row in
+                    (view.view(atColumn: column) as? LikedCell)?.isLiked = liked[self.rows[row].id] != nil
+                }
             }
             let descriptors = sort.flatMap(SongColumn.init).map { [NSSortDescriptor(key: $0.rawValue, ascending: sort?.order == .forward)] } ?? []
             if table.sortDescriptors != descriptors { table.sortDescriptors = descriptors }
@@ -158,6 +171,11 @@ struct SongsTableView: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
             guard let id = tableColumn?.identifier, let column = SongColumn(rawValue: id.rawValue) else { return nil }
             let row = rows[index]
+            if column == .liked {
+                let cell = tableView.makeView(withIdentifier: id, owner: nil) as? LikedCell ?? LikedCell(identifier: id)
+                cell.isLiked = liked[row.id] != nil
+                return cell
+            }
             if column == .title {
                 let cell = tableView.makeView(withIdentifier: id, owner: nil) as? TitleCell ?? TitleCell(identifier: id, cover: album == nil)
                 cell.show(row, artwork: model.artwork, playing: row.id == playing)
@@ -169,7 +187,7 @@ struct SongsTableView: NSViewRepresentable {
             cell.textField?.stringValue = switch column {
             case .number where playlist != nil: "\(index + 1)"
             case .number: row.trackNo.map { multiDisc ? "\(LibraryIndex.disc(of: row))-\($0)" : "\($0)" } ?? ""
-            case .title: row.title
+            case .title, .liked: row.title
             case .artist: row.artistText == album?.artist ? "" : row.artistText
             case .album: row.albumTitle
             case .year: row.year.map(String.init) ?? ""
@@ -320,6 +338,31 @@ private final class TextCell: NSTableCellView {
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// A heart on liked songs.
+private final class LikedCell: NSTableCellView {
+    private let heart = NSImageView(image: NSImage(systemSymbolName: "heart.fill", accessibilityDescription: "喜欢")!)
+
+    var isLiked = false {
+        didSet { heart.isHidden = !isLiked }
+    }
+
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { heart.contentTintColor = backgroundStyle == .emphasized ? .alternateSelectedControlTextColor : .systemPink }
+    }
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+        heart.symbolConfiguration = .init(pointSize: 10, weight: .regular)
+        heart.contentTintColor = .systemPink
+        heart.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(heart)
+        NSLayoutConstraint.activate([heart.centerXAnchor.constraint(equalTo: centerXAnchor), heart.centerYAnchor.constraint(equalTo: centerYAnchor)])
     }
 
     required init?(coder: NSCoder) { fatalError() }
