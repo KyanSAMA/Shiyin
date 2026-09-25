@@ -9,6 +9,8 @@ struct LaunchOptions {
     let outDir: URL?
     let dataDir: URL?
     let fixturesDir: URL?
+    /// Recorded NetEase responses instead of the network (self-tests).
+    let neteaseFixturesDir: URL?
 
     static let current = LaunchOptions(arguments: CommandLine.arguments)
 
@@ -21,23 +23,25 @@ struct LaunchOptions {
         outDir = url(after: "--out")
         dataDir = url(after: "--data-dir")
         fixturesDir = url(after: "--fixtures")
+        neteaseFixturesDir = url(after: "--netease-fixtures")
     }
 
     var isSelfTest: Bool { selfTestScript != nil }
 }
 
 enum SidebarItem: Hashable, Identifiable {
-    case songs, albums, artists, composers, recent, liked
+    case songs, albums, artists, composers, recent, liked, enrich
     case playlist(Int64)
 
     static let library: [Self] = [.songs, .albums, .artists, .composers]
     static let presets: [Self] = [.recent, .liked]
+    static let tools: [Self] = [.enrich]
 
     var id: Self { self }
 
     /// Self-test names of the fixed items.
     init?(name: String) {
-        guard let item = (Self.library + Self.presets).first(where: { $0.name == name }) else { return nil }
+        guard let item = (Self.library + Self.presets + Self.tools).first(where: { $0.name == name }) else { return nil }
         self = item
     }
 
@@ -49,6 +53,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .composers: "composers"
         case .recent: "recent"
         case .liked: "liked"
+        case .enrich: "enrich"
         case .playlist: "playlist"
         }
     }
@@ -61,6 +66,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .composers: "作曲"
         case .recent: "最近添加"
         case .liked: "喜欢的歌曲"
+        case .enrich: "信息补全"
         case .playlist: "播放列表"
         }
     }
@@ -73,6 +79,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .composers: "pianokeys"
         case .recent: "clock"
         case .liked: "heart"
+        case .enrich: "wand.and.sparkles"
         case .playlist: "music.note.list"
         }
     }
@@ -114,6 +121,8 @@ enum Route: Hashable {
     var playlistName = ""
     var deletingPlaylist: Int64?
     var infoEditor: InfoEditor?
+    var enrichFilter = EnrichFilter.missingLyrics
+    var enrichSelection: Set<Int64> = []
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
@@ -208,6 +217,7 @@ enum Route: Hashable {
     let library: LibraryModel?
     let player: PlayerModel?
     let loudness: LoudnessModel?
+    let enrich: EnrichModel?
     let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
@@ -219,7 +229,7 @@ enum Route: Hashable {
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
         artwork = ArtworkStore(cache: ArtworkCache(directory: paths.cache.appending(path: "artwork")))
-        var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?
+        var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?, enrich: EnrichModel?
         do {
             let store = try LibraryStore(url: paths.database)
             library = LibraryModel(store: store)
@@ -230,12 +240,17 @@ enum Route: Hashable {
                 if let library { loudness?.refresh(library.index) }
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
+            let fixtures = options.neteaseFixturesDir
+            enrich = library.map { EnrichModel(store: store, library: $0,
+                                 client: NeteaseClient(configuration: fixtures.map(NeteaseFixtures.configuration) ?? .ephemeral),
+                                 interval: fixtures == nil ? .milliseconds(600) : .zero) }
         } catch {
             startupError = String(describing: error)
         }
         self.library = library
         self.player = player
         self.loudness = loudness
+        self.enrich = enrich
         if let player { Task { await player.restore() } }
         if !options.isSelfTest { enableNowPlaying() }
         // AppKit retains the monitor and calls it on the main thread.

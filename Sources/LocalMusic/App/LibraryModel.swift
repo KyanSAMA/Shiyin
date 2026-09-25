@@ -124,9 +124,14 @@ import LocalMusicCore
         (try? await store.rows(ids, without: .user)) ?? []
     }
 
+    /// After enrichment stored new values.
+    func refresh() async {
+        do { try await reload() } catch { lastError = String(describing: error) }
+    }
+
     private func reloadAfterWrites() async {
         await writes?.value
-        do { try await reload() } catch { lastError = String(describing: error) }
+        await refresh()
     }
 
     func playlist(_ id: Int64) -> Playlist? { playlists.first { $0.id == id } }

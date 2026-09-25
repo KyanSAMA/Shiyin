@@ -273,18 +273,20 @@ public actor LibraryStore {
 
     /// Sets (non-nil) or removes (nil) one source's values for these recordings; fields not given are left alone.
     public func setEnrichment(_ fingerprints: [String], _ values: [EnrichField: String?], source: EnrichSource) throws {
+        try db.transaction { try setEnrichmentRows(fingerprints, values, source: source) }
+    }
+
+    private func setEnrichmentRows(_ fingerprints: [String], _ values: [EnrichField: String?], source: EnrichSource) throws {
         let now = Date().timeIntervalSince1970
-        try db.transaction {
-            let set = try db.prepare("""
-                INSERT INTO enrichment(fingerprint, field, source, value, updated_at) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(fingerprint, field, source) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-                """)
-            let remove = try db.prepare("DELETE FROM enrichment WHERE fingerprint = ? AND field = ? AND source = ?")
-            for fingerprint in fingerprints {
-                for (field, value) in values {
-                    if let value { try set.run([fingerprint, field.rawValue, source.rawValue, value, now]) }
-                    else { try remove.run([fingerprint, field.rawValue, source.rawValue]) }
-                }
+        let set = try db.prepare("""
+            INSERT INTO enrichment(fingerprint, field, source, value, updated_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(fingerprint, field, source) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """)
+        let remove = try db.prepare("DELETE FROM enrichment WHERE fingerprint = ? AND field = ? AND source = ?")
+        for fingerprint in fingerprints {
+            for (field, value) in values {
+                if let value { try set.run([fingerprint, field.rawValue, source.rawValue, value, now]) }
+                else { try remove.run([fingerprint, field.rawValue, source.rawValue]) }
             }
         }
     }
@@ -294,6 +296,40 @@ public actor LibraryStore {
             let remove = try db.prepare("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?")
             for fingerprint in fingerprints { try remove.run([fingerprint, source.rawValue]) }
         }
+    }
+
+    public func setMatch(_ fingerprint: String, _ status: MatchStatus, songID: Int64? = nil, confidence: Double? = nil,
+                         candidates: [NeteaseSong] = []) throws {
+        let json = candidates.isEmpty ? nil : String(decoding: try JSONEncoder().encode(candidates), as: UTF8.self)
+        try db.run("""
+            INSERT OR REPLACE INTO netease_match(fingerprint, song_id, confidence, status, candidates, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+            """, [fingerprint, songID, confidence, status.rawValue, json, Date().timeIntervalSince1970])
+    }
+
+    /// Replaces the NetEase layer and records the match, in one transaction.
+    public func applyMatch(_ fingerprint: String, _ values: [EnrichField: String], _ status: MatchStatus, songID: Int64,
+                           confidence: Double?) throws {
+        try db.transaction {
+            try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, EnrichSource.netease.rawValue])
+            try setEnrichmentRows([fingerprint], values, source: .netease)
+            try setMatch(fingerprint, status, songID: songID, confidence: confidence)
+        }
+    }
+
+    /// All matches, or one recording's.
+    public func matches(_ fingerprint: String? = nil) throws -> [String: MatchState] {
+        let sql = "SELECT fingerprint, status, song_id, candidates FROM netease_match" + (fingerprint == nil ? "" : " WHERE fingerprint = ?")
+        return Dictionary(try db.query(sql, fingerprint.map { [$0] } ?? []) { r in
+            (r.string(0)!, MatchState(status: MatchStatus(rawValue: r.string(1)!) ?? .none, songID: r.int64(2),
+                                      candidates: r.string(3).flatMap { try? JSONDecoder().decode([NeteaseSong].self, from: Data($0.utf8)) } ?? []))
+        }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// NetEase ids from the files' "163 key" comments.
+    public func neteaseKeys() throws -> [Int64: Int64] {
+        Dictionary(try db.query("SELECT id, ncm_key FROM track WHERE ncm_key IS NOT NULL") { r in
+            r.string(1).flatMap(NCMKey.songID).map { (r.int64(0)!, $0) }
+        }.compactMap { $0 }, uniquingKeysWith: { first, _ in first })
     }
 
     public func enrichment(_ fingerprint: String, source: EnrichSource) throws -> [EnrichField: String] {
@@ -356,7 +392,7 @@ public actor LibraryStore {
                             duration: r.double(9) ?? 0, format: r.string(10) ?? "", codec: r.string(19), sampleRate: r.int(11),
                             bitDepth: r.int(12), hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18),
                             hasLyrics: r.int(14) == 1 || layer[.lyrics] != nil, addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0),
-                            fileMtime: r.double(16) ?? 0, fingerprint: fingerprint,
+                            fileMtime: r.double(16) ?? 0, fingerprint: fingerprint, hasFileLyrics: r.int(14) == 1,
                             coverFile: (layer[.cover]?[.user] ?? layer[.cover]?[.netease]).map { covers.appending(path: $0).path })
         }
     }

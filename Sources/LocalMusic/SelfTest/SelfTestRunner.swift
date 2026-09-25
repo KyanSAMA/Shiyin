@@ -27,6 +27,7 @@ final class SelfTestRunner {
     private let started = Date()
     private var snapshots: [String: Any] = [:]
     private var measures: [String: Any] = [:]
+    private var inspected: [String: Any] = [:]
     private var fileCounter = 0
 
     init(model: AppModel) {
@@ -190,6 +191,25 @@ final class SelfTestRunner {
             let index = try library().index
             await model.revertInfo(try trackIDs(step).compactMap { index.tracks[$0] })
             try await settle()
+        case "enrich":
+            // `titles`, else everything still missing something (全部补全); waits for the queue.
+            guard let enrich = model.enrich else { throw SelfTestFailure(description: "no enrichment") }
+            let index = try library().index
+            if step["titles"] != nil { enrich.enrich(try trackIDs(step).compactMap { index.tracks[$0] }) } else { await enrich.enrichAll(index.songs) }
+            await enrich.finish()
+            try await settle()
+        case "enrichFilter":
+            guard let filter = EnrichFilter(rawValue: try step.required("value")) else { throw SelfTestFailure(description: "unknown filter") }
+            model.ui.enrichFilter = filter
+            try await settle()
+        case "inspect":
+            // The song as shown, merged from tags, enrichment and edits.
+            let title = try step.required("title")
+            guard let row = try library().index.songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
+            inspected[title] = ["album": row.album as Any? ?? NSNull(), "artists": row.artists, "composers": row.composers,
+                                "trackNo": row.trackNo as Any? ?? NSNull(), "year": row.year as Any? ?? NSNull(),
+                                "hasLyrics": row.hasLyrics, "hasArtwork": row.hasArtwork, "coverFile": row.coverFile != nil,
+                                "match": model.enrich?.match(row)?.status.rawValue ?? NSNull()] as Step
         case "like":
             let library = try library()
             let ids = try step.string("title").map { title in library.index.songs.filter { $0.title == title }.map(\.id) }
@@ -372,6 +392,15 @@ final class SelfTestRunner {
         }
     }
 
+    private func enrichState(_ enrich: EnrichModel) -> Step {
+        let songs = model.library?.index.songs ?? []
+        func titles(_ status: MatchStatus) -> [String] { songs.filter { enrich.match($0)?.status == status }.map(\.title).sorted() }
+        let counts = EnrichFilter.counts(songs, enrich.match)
+        return ["running": enrich.progress != nil, "notice": enrich.notice ?? NSNull(),
+                "counts": Dictionary(uniqueKeysWithValues: EnrichFilter.allCases.map { ($0.rawValue, counts[$0] ?? 0) }),
+                "auto": titles(.auto), "confirmed": titles(.confirmed), "pending": titles(.pending), "none": titles(.none), "rejected": titles(.rejected)]
+    }
+
     /// The person the artists / composers page shows.
     private func personState() -> Any {
         let ui = model.ui
@@ -396,6 +425,8 @@ final class SelfTestRunner {
             case .albums: return ui.albums(in: index).map(\.title)
             case .recent: return ui.recentAlbums(in: index).map(\.title)
             case .liked: return ui.likedSongs(in: index, liked: model.library?.liked ?? [:]).map(\.title)
+            case .enrich:
+                return ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, model.enrich?.match($0)) }.map(\.title)
             case .playlist(let id):
                 return ui.narrowed(model.library?.playlist(id)?.trackIDs.compactMap { index.tracks[$0] } ?? [], in: index).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)
@@ -577,6 +608,8 @@ final class SelfTestRunner {
             "loudness": model.loudness.map { ["analyzed": $0.progress.analyzed, "failed": $0.progress.failed, "total": $0.progress.total,
                                                 "pending": $0.progress.pending, "mode": $0.mode.rawValue] as Step } ?? NSNull(),
             "measure": measures,
+            "inspected": inspected,
+            "enrich": model.enrich.map(enrichState) ?? NSNull(),
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],

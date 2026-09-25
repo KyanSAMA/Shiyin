@@ -278,6 +278,7 @@ struct SongsTableView: NSViewRepresentable {
             let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
             add(allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked), tag: allLiked ? 0 : 1)   // tag: what it sets
             add("编辑信息…", #selector(editInfo))
+            add("从网易云补全信息", #selector(enrich))
             menu.addItem(.separator())
             add("在访达中显示", #selector(reveal))
         }
@@ -292,6 +293,7 @@ struct SongsTableView: NSViewRepresentable {
         }
         @objc private func reveal(_ item: NSMenuItem) { revealInFinder(picked(item)) }
         @objc private func editInfo(_ item: NSMenuItem) { Task { await model.editInfo(picked(item)) } }
+        @objc private func enrich(_ item: NSMenuItem) { model.enrich?.enrich(picked(item)) }
         @objc private func toggleLiked(_ item: NSMenuItem) { model.library?.setLiked(picked(item).map(\.id), item.tag == 1) }
         private func picked(_ item: NSMenuItem) -> [TrackRow] { item.representedObject as? [TrackRow] ?? [] }
     }
@@ -376,8 +378,8 @@ private final class TitleCell: NSTableCellView {
     private let note = NSImageView(image: NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)!)
     private let mark = NSImageView(image: NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "正在播放")!)
     private var loading: Task<Void, Never>?
-    /// The file whose cover is shown; a new modification time means new art.
-    private var shown: (path: String, mtime: Double)?
+    /// The file whose cover is shown; a new modification time or enrichment cover means new art.
+    private var shown: (path: String, mtime: Double, cover: String?)?
 
     var isPlaying = false {
         didSet { mark.isHidden = !isPlaying }
@@ -438,8 +440,8 @@ private final class TitleCell: NSTableCellView {
     func show(_ row: TrackRow, artwork: ArtworkStore, playing: Bool) {
         textField?.stringValue = row.title
         isPlaying = playing
-        guard !cover.isHidden, shown?.path != row.path || shown?.mtime != row.fileMtime else { return }
-        shown = (row.path, row.fileMtime)
+        guard !cover.isHidden, shown?.path != row.path || shown?.mtime != row.fileMtime || shown?.cover != row.coverFile else { return }
+        shown = (row.path, row.fileMtime, row.coverFile)
         loading?.cancel()
         let pixels = CoverView.pixels(for: 28), box = artwork.box(row, pixels: pixels)
         setCover(box.image)

@@ -88,7 +88,7 @@ struct SidebarView: View {
             ui.sidebar = item
             ui.path = []
         })) {
-            ForEach([("资料库", SidebarItem.library), ("精选", SidebarItem.presets)], id: \.0) { title, items in
+            ForEach([("资料库", SidebarItem.library), ("精选", SidebarItem.presets), ("工具", SidebarItem.tools)], id: \.0) { title, items in
                 Section(title) {
                     ForEach(items) { row(item: $0, title: $0.title) }
                 }
@@ -161,6 +161,8 @@ struct DetailView: View {
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
                     Results(ui: ui, isEmpty: groups.isEmpty) { PeopleBrowser(groups: groups, role: role, index: index) }
+                case .enrich:
+                    if let enrich = model.enrich { EnrichView(model: model, enrich: enrich, index: index) }
                 case .playlist(let id):
                     if let playlist = library.playlist(id) {
                         PlaylistView(playlist: playlist, index: index)

@@ -21,3 +21,22 @@ public enum EnrichField: String, CaseIterable, Sendable {
 public enum EnrichSource: String, Sendable {
     case user, netease
 }
+
+public enum MatchStatus: String, Sendable, Codable {
+    /// Applied without asking (a "163 key" or a confident match).
+    case auto
+    /// Chosen by the user from the candidates.
+    case confirmed
+    case pending
+    /// NetEase had nothing that fits.
+    case none
+    /// The user dismissed every candidate; batch enrichment leaves it alone.
+    case rejected
+}
+
+public struct MatchState: Sendable, Equatable {
+    public let status: MatchStatus
+    public let songID: Int64?
+    /// For `pending`: best first.
+    public let candidates: [NeteaseSong]
+}

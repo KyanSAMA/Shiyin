@@ -63,6 +63,8 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public let addedAt: Date
     public let fileMtime: Double
     public var fingerprint: String? = nil
+    /// The file's own lyrics (embedded or sidecar), as opposed to enrichment's.
+    public var hasFileLyrics = false
     /// A downloaded or chosen cover, for a file without its own.
     public var coverFile: String? = nil
 

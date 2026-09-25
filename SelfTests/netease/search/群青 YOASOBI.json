@@ -1,0 +1,3 @@
+{"code":200,"result":{"songCount":2,"songs":[
+ {"id":1472480890,"name":"群青","ar":[{"name":"YOASOBI"}],"al":{"name":"群青","picUrl":"http://p2.music.126.net/fixture/single.jpg"},"dt":3000,"no":1,"cd":"01","publishTime":1598889600000},
+ {"id":1500151581,"name":"群青","ar":[{"name":"YOASOBI"}],"al":{"name":"THE BOOK","picUrl":"http://p2.music.126.net/fixture/book.jpg"},"dt":3000,"no":6,"cd":"01","publishTime":1609862400000}]}}

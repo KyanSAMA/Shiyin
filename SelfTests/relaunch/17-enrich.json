@@ -1,0 +1,12 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "library.scanning", "equals": false, "timeout": 10 },
+    { "do": "inspect", "title": "春日影" },
+    { "do": "assert", "path": "inspected.春日影.year", "equals": 2023 },
+    { "do": "assert", "path": "inspected.春日影.match", "equals": "auto" },
+    { "do": "assert", "path": "enrich.pending", "equals": ["无标签标题"] }
+  ]
+}

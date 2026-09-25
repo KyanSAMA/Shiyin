@@ -10,7 +10,7 @@
 #              Step (the Gapless tone with part 2 6 dB down: track gains must switch exactly on the join)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=6
+VERSION=7
 OUT=.build/fixtures
 [ "$(cat "$OUT/.version" 2>/dev/null)" = "$VERSION" ] && exit 0
 rm -rf "$OUT"
@@ -22,12 +22,13 @@ ff() { ffmpeg -v error -y "$@"; }
 ff -f lavfi -i "color=c=0x2f5aa8:s=600x600,drawbox=x=100:y=100:w=400:h=400:color=0xf2c14e:t=fill" -frames:v 1 "$OUT/cover-a.png"
 ff -f lavfi -i "color=c=0x8a2be2:s=600x600,drawbox=x=0:y=300:w=600:h=300:color=0x20b2aa:t=fill" -frames:v 1 "$OUT/cover-b.png"
 
-# audio <out> <seconds> <rate> <codec args> <cover.png|-> [ffmpeg metadata args...]
+# audio <out> <seconds> <rate> <codec args> <cover.png|-> [ffmpeg metadata args...]; FREQ (default 440 Hz) keeps files of
+# the same length and rate from being the same recording (enrichment is keyed by audio content)
 audio() {
   local out=$1 seconds=$2 rate=$3 codec=$4 cover=$5
   shift 5
   mkdir -p "$(dirname "$out")"
-  local source=(-f lavfi -i "sine=frequency=440:duration=$seconds:sample_rate=$rate")
+  local source=(-f lavfi -i "sine=frequency=${FREQ:-440}:duration=$seconds:sample_rate=$rate")
   if [ "$cover" = - ]; then
     ff "${source[@]}" $codec "$@" "$out"
   else
@@ -67,7 +68,7 @@ audio "$LIB/m4a/春日影.m4a" 2 48000 "-c:a alac -sample_fmt s16p" - \
   -metadata title=春日影 -metadata artist=MyGO!!!!! -metadata album=迷跡波 -metadata composer=藤田淳平 -metadata track=3/10
 audio "$LIB/wav/untagged.wav" 2 44100 "-c:a pcm_s16le" -
 audio "$LIB/53.无标签标题.flac" 2 44100 "$FLAC16" -
-audio "$LIB/sidecar/歌.flac" 3 44100 "$FLAC16" -
+FREQ=523 audio "$LIB/sidecar/歌.flac" 3 44100 "$FLAC16" -
 printf '[00:00.50]侧边歌词第一行\n[00:01.50]第二行\n' > "$LIB/sidecar/歌.lrc"
 printf '[00:00.20]一\n[00:00.60]二\n[00:01.00]三\n[00:01.40]四\n[00:01.80]五\n' > "$OUT/sidecar-5.lrc"
 
@@ -84,7 +85,7 @@ mkdir -p "$LIB/junk"
 ff -i "$OUT/cover-a.png" "$LIB/junk/cover.jpg"
 printf 'not audio' > "$LIB/junk/music_tag.db"
 
-audio "$OUT/extra/新歌.flac" 2 44100 "$FLAC16" - -metadata title=新歌 -metadata artist=YOASOBI
+FREQ=660 audio "$OUT/extra/新歌.flac" 2 44100 "$FLAC16" - -metadata title=新歌 -metadata artist=YOASOBI
 
 # level <out> <LUFS> <mono|stereo> <lavfi source> [ffmpeg output args...]: measure once, then scale to the target
 level() {

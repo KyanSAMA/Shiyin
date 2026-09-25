@@ -53,7 +53,7 @@ public actor ArtworkCache {
     }
 
     /// Embedded art keyed by track and file mtime; folder art by the image's path and mtime; then an enrichment cover
-    /// (its file name changes with each download).
+    /// (a new name for each download).
     static func source(for row: TrackRow) -> Source? {
         if row.hasCover { return Source(key: "t\(row.id)-\(Int(row.fileMtime))", track: row, folderImage: nil) }
         guard let url = folderImage(near: row),
@@ -83,6 +83,9 @@ public actor ArtworkCache {
         if let image { write(image, to: cacheFile) }
         return image
     }
+
+    /// A cover.jpg / folder.jpg-style image beside the file (shown when it has no embedded cover).
+    public static func hasFolderImage(near row: TrackRow) -> Bool { folderImage(near: row) != nil }
 
     private static func folderImage(near row: TrackRow) -> URL? {
         let folder = row.url.deletingLastPathComponent()

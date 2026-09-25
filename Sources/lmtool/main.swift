@@ -41,7 +41,7 @@ func describe(_ url: URL, _ raw: RawTrack, _ meta: TrackMetadata) -> [String: An
     case nil: nil
     }
     return [
-        "path": url.path,
+        "path": url.path, "fingerprint": value(raw.fingerprint),
         "format": p.format, "codec": value(p.codec), "sampleRate": value(p.sampleRate), "bitDepth": value(p.bitDepth),
         "channels": value(p.channels), "frameCount": value(p.frameCount), "duration": p.duration,
         "tags": raw.tags.fields,
