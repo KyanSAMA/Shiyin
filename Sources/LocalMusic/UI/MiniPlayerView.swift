@@ -50,7 +50,9 @@ struct MiniPlayerView: View {
                     }
                     button("下一首", "forward.fill", size: 13) { player.next() }
                     Spacer(minLength: 0)
-                    if let library = model.library, let current = player.current { LikeButton(library: library, track: current.id) }
+                    if let library = model.library, let current = player.current {
+                        LikeButton(library: library, track: current.id, side: 28).font(.system(size: 12))
+                    }
                     button("显示主窗口", "arrow.up.left.and.arrow.down.right", size: 12) { model.showMainWindow() }
                     button("关闭迷你播放器", "xmark", size: 11) { model.setMiniPlayer(false) }
                 }
@@ -87,17 +89,25 @@ private struct MiniLyric: View {
     }
 }
 
-/// Reads `position` (20 Hz), so kept to this leaf.
+/// Reads `position` (20 Hz), so kept to this leaf. Click or drag to seek; it takes the drag from the window's.
 private struct MiniProgress: View {
     let player: PlayerModel
+    /// Resets itself if the drag is cancelled (the panel hidden, the queue ending mid-drag).
+    @GestureState private var dragged: Double?
 
     var body: some View {
-        let fraction = player.duration > 0 ? min(max(player.position / player.duration, 0), 1) : 0
-        Capsule()
-            .fill(.white.opacity(0.2))
-            .overlay(alignment: .leading) {
-                GeometryReader { Capsule().fill(.white.opacity(0.8)).frame(width: $0.size.width * fraction) }
-            }
-            .frame(height: 3)
+        let duration = player.duration
+        let fraction = dragged ?? (duration > 0 ? min(max(player.position / duration, 0), 1) : 0)
+        GeometryReader { geometry in
+            Capsule()
+                .fill(.white.opacity(0.2))
+                .overlay(alignment: .leading) { Capsule().fill(.white.opacity(0.8)).frame(width: geometry.size.width * fraction) }
+                .contentShape(Rectangle().inset(by: -6))   // a 3 pt bar is too thin to hit
+                .gesture(DragGesture(minimumDistance: 0)
+                    .updating($dragged) { value, dragged, _ in dragged = min(max(value.location.x / geometry.size.width, 0), 1) }
+                    .onEnded { player.seek(to: min(max($0.location.x / geometry.size.width, 0), 1) * duration) })
+                .disabled(duration <= 0)
+        }
+        .frame(height: 3)
     }
 }

@@ -17,7 +17,7 @@ struct NowPlayingView: View {
                         Text(player.current?.title ?? "未在播放").font(.system(size: 22, weight: .bold))
                         Text(player.current?.artistText ?? "").font(.system(size: 15)).foregroundStyle(.secondary)
                         Text(player.current?.album ?? "").font(.system(size: 13)).foregroundStyle(.tertiary)
-                        if let library = model.library, let current = player.current { LikeButton(library: library, track: current.id) }
+                        if let library = model.library, let current = player.current { LikeButton(library: library, track: current.id).font(.system(size: 14)) }
                     }
                     .lineLimit(1)
                     .multilineTextAlignment(.center)

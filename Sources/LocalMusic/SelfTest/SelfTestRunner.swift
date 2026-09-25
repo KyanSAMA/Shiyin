@@ -231,6 +231,9 @@ final class SelfTestRunner {
                 window.sendEvent(unhandled)
             }
             try await settle()
+        case "clearFocus":
+            try window().makeFirstResponder(nil)
+            try await settle()
         case "focusList":
             // The SwiftUI list right of the sidebar (e.g. the people list) takes the keyboard.
             let window = try window()

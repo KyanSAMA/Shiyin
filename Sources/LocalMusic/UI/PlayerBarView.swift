@@ -7,7 +7,7 @@ struct PlayerBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             if let player = model.player {
-                NowPlayingSummary(player: player, library: model.library, artwork: model.artwork, ui: model.ui)
+                NowPlayingSummary(player: player, artwork: model.artwork, ui: model.ui)
                     .frame(width: 260, alignment: .leading)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
@@ -16,7 +16,7 @@ struct PlayerBarView: View {
                 }
                 .frame(maxWidth: 520)
                 Spacer(minLength: 0)
-                PageToggles(model: model, hasTrack: player.current != nil)
+                PageToggles(model: model, current: player.current?.id)
                 if let loudness = model.loudness { NormalizationMenu(loudness: loudness) }
                 VolumeControl(player: player)
                     .frame(width: 130)
@@ -30,7 +30,6 @@ struct PlayerBarView: View {
 
 private struct NowPlayingSummary: View {
     let player: PlayerModel
-    let library: LibraryModel?
     let artwork: ArtworkStore
     let ui: UIState
 
@@ -43,12 +42,9 @@ private struct NowPlayingSummary: View {
             .disabled(player.current == nil)
             .help("播放页")
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 2) {
-                    Text(player.current?.title ?? "未在播放")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(player.current == nil ? .secondary : .primary)
-                    if let library, let current = player.current { LikeButton(library: library, track: current.id, size: 11, side: 20) }
-                }
+                Text(player.current?.title ?? "未在播放")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(player.current == nil ? .secondary : .primary)
                 if let notice = player.skipNotice {
                     Label(notice, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
@@ -64,20 +60,21 @@ private struct NowPlayingSummary: View {
     }
 }
 
+/// Sized by the surrounding `.font`, like the buttons beside it.
 struct LikeButton: View {
     let library: LibraryModel
-    let track: Int64
-    var size: CGFloat = 14
+    let track: Int64?
     var side: CGFloat = 30
 
     var body: some View {
-        let liked = library.liked[track] != nil
-        Button { library.setLiked([track], !liked) } label: {
-            Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.fill" : "heart").font(.system(size: size))
+        let liked = track.map { library.liked[$0] != nil } ?? false
+        Button { track.map { library.setLiked([$0], !liked) } } label: {
+            Label(liked ? "取消喜欢" : "喜欢", systemImage: liked ? "heart.fill" : "heart")
         }
         .buttonStyle(IconButtonStyle(side: side))
         .foregroundStyle(liked ? AnyShapeStyle(.pink) : AnyShapeStyle(.secondary))
         .help(liked ? "取消喜欢" : "喜欢")
+        .disabled(track == nil)
     }
 }
 
@@ -112,14 +109,16 @@ private struct TransportControls: View {
 
 private struct PageToggles: View {
     let model: AppModel
-    let hasTrack: Bool
+    let current: Int64?
 
     var body: some View {
         let ui = model.ui
         HStack(spacing: 2) {
+            // Always there (disabled without a track), so the centred transport doesn't shift when playback starts.
+            if let library = model.library { LikeButton(library: library, track: current) }
             Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble") }
                 .foregroundStyle(ui.nowPlayingShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-                .disabled(!hasTrack)
+                .disabled(current == nil)
             Button { ui.queueShown.toggle() } label: { Label("播放队列", systemImage: "list.bullet") }
                 .foregroundStyle(ui.queueShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             Button { model.setMiniPlayer(!model.miniPlayerShown) } label: { Label("迷你播放器", systemImage: "pip.enter") }

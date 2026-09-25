@@ -241,15 +241,19 @@ enum Route: Hashable {
         _ = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] in self?.handleKey($0) ?? $0 }
     }
 
-    /// Runs before menu key equivalents: space plays / pauses in the library window, except while text is being edited
-    /// (as a bare-space menu shortcut it would swallow spaces typed into the search field). Returns the event if it
-    /// should continue.
+    /// Bare keys in the library window, run before menu key equivalents (a bare-key menu shortcut would swallow what's
+    /// typed into the search field): space plays / pauses, ← / → seek 5 s. Text being edited keeps them. Returns the
+    /// event if it should continue.
     func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard let window = event.window else { return event }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
-        guard event.keyCode == 49, modifiers.isEmpty, !(window.firstResponder is NSText), window.isLibraryWindow,
+        guard modifiers.isEmpty, let window = event.window, window.isLibraryWindow, !(window.firstResponder is NSText),
               let player, player.queue.current != nil else { return event }
-        if !event.isARepeat { player.togglePlayPause() }
+        switch event.keyCode {
+        case 49: if !event.isARepeat { player.togglePlayPause() }
+        case 123 where player.current != nil: player.seek(to: max(player.position - 5, 0))
+        case 124 where player.current != nil: player.seek(to: min(player.position + 5, player.duration))
+        default: return event
+        }
         return nil
     }
 
