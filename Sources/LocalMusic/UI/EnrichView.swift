@@ -43,11 +43,24 @@ struct EnrichView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 List(rows, selection: $ui.enrichSelection) { row in
-                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row))
+                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row)) { choose(row) }
+                        .contextMenu {
+                            Button("重新查找") { enrich.enrich([row]) }
+                            if let match = enrich.match(row), match.status != .pending, !match.candidates.isEmpty {
+                                Button("选择其他匹配…") { choose(row) }
+                            }
+                            if enrich.match(row).map({ $0.status != .rejected }) ?? false {
+                                Button("清除补全并不再查找") { Task { await enrich.reject(row) } }
+                            }
+                        }
                 }
                 .id(ui.listID + [ui.enrichFilter])
             }
         }
+    }
+
+    private func choose(_ row: TrackRow) {
+        model.ui.candidatesFor = (row, enrich.match(row)?.candidates ?? [])
     }
 
     @ViewBuilder private func actions(rows: [TrackRow]) -> some View {
@@ -76,6 +89,7 @@ private struct EnrichRow: View {
     let store: ArtworkStore
     let row: TrackRow
     let match: MatchState?
+    let choose: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -91,7 +105,7 @@ private struct EnrichRow: View {
                 if !row.hasLyrics { Badge(text: "缺歌词") }
                 if EnrichFilter.missingInfo(row) { Badge(text: "缺信息") }
             }
-            status.frame(width: 72, alignment: .trailing)
+            status.frame(width: 80, alignment: .trailing)
         }
         .padding(.vertical, 2)
     }
@@ -99,7 +113,7 @@ private struct EnrichRow: View {
     @ViewBuilder private var status: some View {
         switch match?.status {
         case .auto?, .confirmed?: Label("已补全", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-        case .pending?: Label("待确认", systemImage: "questionmark.circle.fill").foregroundStyle(.orange)
+        case .pending?: Button("选择…", action: choose)
         case .none?: Label("未找到", systemImage: "minus.circle").foregroundStyle(.secondary)
         case .rejected?: Label("已忽略", systemImage: "xmark.circle").foregroundStyle(.secondary)
         case nil: EmptyView()

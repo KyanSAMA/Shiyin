@@ -316,6 +316,17 @@ public actor LibraryStore {
         }
     }
 
+    /// Drops the NetEase layer and marks the recording so batch enrichment leaves it alone; returns the cover file it
+    /// referenced.
+    public func rejectMatch(_ fingerprint: String) throws -> String? {
+        try db.transaction {
+            let cover = try enrichment(fingerprint, source: .netease)[.cover]
+            try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, EnrichSource.netease.rawValue])
+            try setMatch(fingerprint, .rejected)
+            return cover
+        }
+    }
+
     /// All matches, or one recording's.
     public func matches(_ fingerprint: String? = nil) throws -> [String: MatchState] {
         let sql = "SELECT fingerprint, status, song_id, candidates FROM netease_match" + (fingerprint == nil ? "" : " WHERE fingerprint = ?")

@@ -123,6 +123,8 @@ enum Route: Hashable {
     var infoEditor: InfoEditor?
     var enrichFilter = EnrichFilter.missingLyrics
     var enrichSelection: Set<Int64> = []
+    /// The song whose NetEase candidates are being chosen from, with the candidates as they were when the sheet opened.
+    var candidatesFor: (row: TrackRow, candidates: [NeteaseSong])?
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?

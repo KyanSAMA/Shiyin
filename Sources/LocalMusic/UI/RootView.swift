@@ -61,6 +61,11 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { ui.infoEditor != nil }, set: { if !$0 { ui.infoEditor = nil } })) {
             if let editor = ui.infoEditor { InfoEditorView(model: model, editor: editor) }
         }
+        .sheet(isPresented: Binding(get: { ui.candidatesFor != nil }, set: { if !$0 { ui.candidatesFor = nil } })) {
+            if let choice = ui.candidatesFor, let enrich = model.enrich {
+                CandidatePicker(model: model, enrich: enrich, row: choice.row, candidates: choice.candidates)
+            }
+        }
         .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",
                             isPresented: Binding(get: { ui.deletingPlaylist != nil }, set: { if !$0 { ui.deletingPlaylist = nil } }),
                             titleVisibility: .visible, presenting: ui.deletingPlaylist) { id in

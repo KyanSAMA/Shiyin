@@ -198,6 +198,26 @@ final class SelfTestRunner {
             if step["titles"] != nil { enrich.enrich(try trackIDs(step).compactMap { index.tracks[$0] }) } else { await enrich.enrichAll(index.songs) }
             await enrich.finish()
             try await settle()
+        case "openCandidates", "chooseCandidate", "rejectMatch":
+            // Through the same model calls as the 选择匹配 sheet's buttons.
+            let title = try step.required("title")
+            guard let enrich = model.enrich, let row = try library().index.songs.first(where: { $0.title == title }) else {
+                throw SelfTestFailure(description: "no song \(title)")
+            }
+            let candidates = enrich.match(row)?.candidates ?? []
+            if step.string("do") == "openCandidates" {
+                model.ui.candidatesFor = (row, candidates)
+            } else {
+                model.ui.candidatesFor = nil
+                if step.string("do") == "rejectMatch" {
+                    await enrich.reject(row)
+                } else if let song = candidates.dropFirst(Int(step.number("index") ?? 0)).first {
+                    await enrich.choose(song, for: row)
+                } else {
+                    throw SelfTestFailure(description: "no candidate")
+                }
+            }
+            try await settle()
         case "enrichFilter":
             guard let filter = EnrichFilter(rawValue: try step.required("value")) else { throw SelfTestFailure(description: "unknown filter") }
             model.ui.enrichFilter = filter
@@ -529,7 +549,7 @@ final class SelfTestRunner {
     }
 
     private func window(_ name: String = "main") throws -> NSWindow {
-        let window = name == "main" ? mainWindow : NSApp.windows.first {
+        let window = name == "main" ? mainWindow : name == "sheet" ? mainWindow?.attachedSheet : NSApp.windows.first {
             $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || name == "settings" && $0.title.contains("设置"))
         }
         guard let window else { throw SelfTestFailure(description: "\(name) window not found") }

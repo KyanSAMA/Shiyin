@@ -1,2 +1,2 @@
 {"code":200,"result":{"songCount":1,"songs":[
- {"id":3001,"name":"无标签标题","ar":[{"name":"某位歌手"}],"al":{"name":"某张专辑"},"dt":2000,"no":4,"cd":"01","publishTime":1577836800000}]}}
+ {"id":3001,"name":"无标签标题","ar":[{"name":"某位歌手"}],"al":{"name":"某张专辑","picUrl":"http://p1.music.126.net/fixture/3001.jpg"},"dt":2000,"no":4,"cd":"01","publishTime":1577836800000}]}}

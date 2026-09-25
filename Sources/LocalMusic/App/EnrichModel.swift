@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 import LocalMusicCore
 
@@ -9,6 +9,9 @@ import LocalMusicCore
     private(set) var progress: (done: Int, total: Int)?
     /// The last run's problem, or a note such as nothing being left to do.
     private(set) var notice: String?
+    /// Candidate covers for the 选择匹配 sheet, fetched while it's open.
+    private(set) var thumbnails: [URL: NSImage] = [:]
+    @ObservationIgnored private var requestedThumbnails = Set<URL>()
 
     @ObservationIgnored private let store: LibraryStore
     @ObservationIgnored private let service: EnrichService
@@ -47,6 +50,44 @@ import LocalMusicCore
         if task == nil { task = Task { await run() } }
     }
 
+    /// The user's pick among the candidates. A queued lookup of the song is dropped; one in flight finishes first.
+    func choose(_ song: NeteaseSong, for row: TrackRow) async {
+        guard let job = job(row, songID: nil) else { return }
+        dequeue(job.fingerprint)
+        do { try await service.apply(song, to: job, status: .confirmed, confidence: nil) } catch { notice = "补全失败：\(error)" }
+        await reloadMatch(job.fingerprint)
+        await library.refresh()
+    }
+
+    func reject(_ row: TrackRow) async {
+        guard let fingerprint = row.fingerprint else { return }
+        dequeue(fingerprint)
+        do { try await service.reject(fingerprint) } catch { notice = String(describing: error) }
+        await reloadMatch(fingerprint)
+        await library.refresh()
+    }
+
+    private func dequeue(_ fingerprint: String) {
+        let before = queue.count
+        queue.removeAll { $0.fingerprint == fingerprint }
+        if before != queue.count { progress?.total -= before - queue.count }
+    }
+
+    private func reloadMatch(_ fingerprint: String) async {
+        matches[fingerprint] = try? await store.matches(fingerprint)[fingerprint]
+    }
+
+    /// Once per URL until the sheet closes, also when it fails.
+    func loadThumbnail(_ url: URL) async {
+        guard requestedThumbnails.insert(url).inserted, let data = try? await service.thumbnail(url), let image = NSImage(data: data) else { return }
+        thumbnails[url] = image
+    }
+
+    func clearThumbnails() {
+        thumbnails = [:]
+        requestedThumbnails = []
+    }
+
     func stop() {
         queue.removeAll()
         task?.cancel()
@@ -73,7 +114,7 @@ import LocalMusicCore
                 default:
                     failures = 0
                 }
-                if let state = try? await store.matches(job.fingerprint)[job.fingerprint] { matches[job.fingerprint] = state }
+                await reloadMatch(job.fingerprint)
             }
             progress?.done += 1
             if refreshed.duration(to: .now) > .seconds(2) {
