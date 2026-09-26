@@ -167,7 +167,7 @@ enum ID3Reader {
         }
     }
 
-    private static func isFrameID(_ id: ArraySlice<UInt8>) -> Bool {
+    static func isFrameID(_ id: ArraySlice<UInt8>) -> Bool {
         id.count == 4 && id.allSatisfy { (0x41...0x5A).contains($0) || (0x30...0x39).contains($0) }
     }
 

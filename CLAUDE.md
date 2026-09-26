@@ -8,13 +8,14 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 自测：`Scripts/selftest.sh SelfTests/NN-*.json` → `.build/selftest/<name>/`（PNG、`*.state.json`、`report.json`、`app.log`）；退出码 0 通过 / 1 失败 / 2 超时或崩溃
 - 全部自测：`Scripts/run-all-selftests.sh`（结束时用 `find -newer` 证明 `~/Music` 未被写入）；夹具由 `Scripts/make-fixtures.sh` 生成到 `.build/fixtures`（改动时递增 VERSION）
 - 无障碍操作：`swift Scripts/ax-press.swift <文本>`（或先 `swiftc -O` 编译），对运行中 App 里标题/描述/值等于该文本的元素做 AX 选中行 / 按下
-- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`、`lmtool scan <db> [<根目录>...]`、`lmtool decode-check <路径>`、`lmtool loudness [--album] <路径>`、`lmtool online search|lyric <netease|qq|itunes|lrclib> <关键词>|song <网易云 id>|match <文件>`（真实请求在线来源，只在开发验证时少量使用）；`Scripts/validate-loudness.sh` 对照 ffmpeg ebur128（30 首真实曲目，积分响度 ±0.5 LU、无损采样峰值 ±0.1 dB、≥20× 实时）；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
+- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`、`lmtool scan <db> [<根目录>...]`、`lmtool decode-check <路径>`、`lmtool loudness [--album] <路径>`、`lmtool online search|lyric <netease|qq|itunes|lrclib> <关键词>|song <网易云 id>|match <文件>`（真实请求在线来源，只在开发验证时少量使用）、`lmtool write-tags <文件> --backup <json> [--set 字段=值]... [--cover 图] [--lyrics 文件]` / `restore-tags <文件> --backup <json>`（拒绝 `~/Music` 下的文件）；`Scripts/validate-write.sh` 把真实曲库里几类文件（有 / 无 padding 的 FLAC，ID3v2.3 / v2.4、带 163 key 的 MP3）复制到 `.build/write-check` 后写入，用 flac -t / metaflac / ffprobe / ffmpeg 校验，恢复后须与副本逐字节相同；`Scripts/validate-loudness.sh` 对照 ffmpeg ebur128（30 首真实曲目，积分响度 ±0.5 LU、无损采样峰值 ±0.1 dB、≥20× 实时）；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
 
 ## 硬性约束
 - 只有 Command Line Tools：SwiftUI 宏插件缺失，禁用 `@State` / `@Entry` / `#Preview` / Animatable 宏；状态放 `@Observable` 模型，经 `.environment` 注入，`body` 里用 `@Bindable` 或 `Binding(get:set:)`
 - `swift test` 依赖 `Package.swift` 里测试目标的 `-plugin-path`（CLT 不会自动传 TestingMacros）
 - 零第三方依赖；ffmpeg / ffprobe / metaflac 只用于测试夹具和对照
-- 曲库只读：任何代码路径都不得写入曲库目录
+- 曲库默认只读：只有 `TagWriter` 在用户明确「写入文件 / 恢复原标签」时改文件（`TagRegion.commit` 是唯一改动曲库文件的代码）：只改标签区，同目录隐藏临时文件（`.<名>.localmusic-tmp-<随机>.<扩展名>`，长度不变时 clone，变长时只复制权限 / ACL / 扩展属性，修改时间取新的）+ `rename` 原子替换，替换前校验音频字节 SHA-256、指纹、读回的值、`AVAudioFile` 能打开，并确认原文件没被改过；扫描、补全、自测等其他代码路径不得写入曲库目录，lmtool 只写 `~/Music` 以外的副本
+- `URL` 会缓存 `resourceValues`：判断文件是否变过（大小 / 修改时间）前先 `removeAllCachedResourceValues()`，否则读到的是旧值
 - 设置存 SQLite `setting` 表，不用 UserDefaults
 - 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并（封面 / 歌词同样手动优先：`TrackRow.userCover`、`lyrics(for:)`）；「选择匹配」写各来源层（只补空缺；勾选「替换」的项写手动层），「编辑信息」写手动层；各来源接口的注意事项见 `需求与技术路线.md` 4.2
 - 数据库迁移只追加，不修改已提交的迁移

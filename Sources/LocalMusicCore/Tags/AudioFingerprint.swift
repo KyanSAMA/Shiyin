@@ -46,7 +46,7 @@ enum AudioFingerprint {
     }
 
     /// Where ID3v1, APEv2 and Lyrics3v2 tags at the end of an MP3 begin, in whatever order they were appended.
-    private static func trailingTagsStart(_ source: ByteSource) throws -> Int64 {
+    static func trailingTagsStart(_ source: ByteSource) throws -> Int64 {
         var end = source.size
         while true {
             if end >= 128, try source.read(at: end - 128, count: 3) == Data("TAG".utf8) {

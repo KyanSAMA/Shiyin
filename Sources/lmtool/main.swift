@@ -10,6 +10,9 @@ import LocalMusicCore
 //   lmtool loudness [--album] <file|dir>...  (BS.1770 integrated loudness and sample peak per file)
 //   lmtool online search|lyric <netease|qq|itunes|lrclib> <keywords> | song <netease id> | match <file>
 //     (live requests; `lyric` prints the top result's lyrics, `match` tries every source like batch enrichment)
+//   lmtool write-tags <file> --backup <json> [--set title|artists|album|albumArtist|trackNo|discNo|year|genre|composers=<value>]...
+//          [--cover <image>] [--lyrics <file>]   (artists / composers split on "/"; never under ~/Music)
+//   lmtool restore-tags <file> --backup <json>
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -192,6 +195,60 @@ func online(_ arguments: [String]) async throws {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+/// Tag writing for validation runs on copies: refuses anything in the user's Music folder.
+func writableCopy(_ path: String) throws -> URL {
+    let url = URL(filePath: path).resolvingSymlinksInPath()
+    // Case-insensitive, and past the Data-volume firmlink.
+    func folded(_ path: String) -> String { path.replacing(/^\/System\/Volumes\/Data/, with: "").lowercased() }
+    let music = folded(FileManager.default.homeDirectoryForCurrentUser.appending(path: "Music").resolvingSymlinksInPath().path + "/")
+    guard !folded(url.path).hasPrefix(music) else { throw TagWriteError.unsupported("拒绝写入 ~/Music 下的文件") }
+    return url
+}
+
+func writeTags(_ arguments: [String]) async throws {
+    let url = try writableCopy(arguments[0])
+    var edit = TagEdit(), backup: String?
+    var rest = arguments.dropFirst()
+    while let flag = rest.popFirst() {
+        guard let value = rest.popFirst() else { throw TagWriteError.unsupported("\(flag) needs a value") }
+        func number() throws -> Int {
+            guard let number = Int(value.drop { $0 != "=" }.dropFirst()) else { throw TagWriteError.unsupported("not a number: \(value)") }
+            return number
+        }
+        switch flag {
+        case "--backup": backup = value
+        case "--cover": edit.cover = try TagEdit.Cover(Data(contentsOf: URL(filePath: value)))
+        case "--lyrics": edit.lyrics = try String(contentsOf: URL(filePath: value), encoding: .utf8)
+        case "--set":
+            let key = String(value.prefix { $0 != "=" }), text = String(value.drop { $0 != "=" }.dropFirst())
+            let names = text.split(separator: "/").map { $0.trimmingCharacters(in: .whitespaces) }
+            switch key {
+            case "title": edit.title = text
+            case "artists": edit.artists = names
+            case "album": edit.album = text
+            case "albumArtist": edit.albumArtist = text
+            case "trackNo": edit.trackNo = try number()
+            case "discNo": edit.discNo = try number()
+            case "year": edit.year = try number()
+            case "genre": edit.genre = text
+            case "composers": edit.composers = names
+            default: throw TagWriteError.unsupported("unknown field \(key)")
+            }
+        default: throw TagWriteError.unsupported("unknown flag \(flag)")
+        }
+    }
+    // The first backup is the true original: a second write to the same one would overwrite it.
+    guard let backup, !FileManager.default.fileExists(atPath: backup) else { throw TagWriteError.unsupported("--backup is required and must not exist") }
+    let version = try await TagWriter.write(edit, to: url) { try JSONEncoder().encode($0).write(to: URL(filePath: backup)) }
+    emit(["size": version.size, "mtime": version.mtime])
+}
+
+func restoreTags(_ path: String, backup: String) async throws {
+    let original = try JSONDecoder().decode(TagWriter.Original.self, from: Data(contentsOf: URL(filePath: backup)))
+    let version = try await TagWriter.restore(try writableCopy(path), to: original)
+    emit(["size": version.size, "mtime": version.mtime])
+}
+
 switch arguments.first {
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
@@ -205,7 +262,11 @@ case "scan" where arguments.count >= 2:
     try await scan(arguments[1], Array(arguments.dropFirst(2)))
 case "online" where arguments.count > 2:
     try await online(Array(arguments.dropFirst()))
+case "write-tags" where arguments.count > 1:
+    try await writeTags(Array(arguments.dropFirst()))
+case "restore-tags" where arguments.count == 4 && arguments[2] == "--backup":
+    try await restoreTags(arguments[1], backup: arguments[3])
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file>\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file> | lmtool write-tags <file> --backup <json> [--set k=v]... [--cover img] [--lyrics file] | lmtool restore-tags <file> --backup <json>\n".utf8))
     exit(64)
 }
