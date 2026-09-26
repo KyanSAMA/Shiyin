@@ -85,6 +85,15 @@ public actor EnrichService {
         return try await paced(.netease) { try await self.client.neteaseSong(id) }?.year
     }
 
+    /// A NetEase song by its id (from an .ncm or a "163 key"), and its cover (paced).
+    public func neteaseSong(_ id: Int64) async throws -> OnlineSong? {
+        try await paced(.netease) { try await self.client.neteaseSong(id) }
+    }
+
+    public func cover(_ song: OnlineSong) async throws -> Data? {
+        try await paced(song.source) { try await self.client.cover(song) }
+    }
+
     /// LRCLIB's lyrics come with the song and iTunes has none: no request to pace.
     public func lyrics(_ song: OnlineSong) async throws -> String? {
         song.source == .netease || song.source == .qq ? try await paced(song.source) { try await self.client.lyrics(song) } : try await client.lyrics(song)

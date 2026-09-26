@@ -24,7 +24,7 @@ public enum TagWriter {
         let url = url.resolvingSymlinksInPath()
         try TagRegion.checkWritable(url)
         let version = try FileVersion(url)
-        var file = try TagFile(url)
+        var file = try TagFile(url, discarding: edit.replaceAll)
         let source = try FileSource(url: url)
         let original = Original(format: file.format, region: try source.read(at: file.start, count: Int(file.length)),
                                 audioSHA256: try TagRegion.sha256(url, try file.audio(source)), version: version)
@@ -89,6 +89,7 @@ public enum TagWriter {
         if let composers = edit.composers, meta.people.filter({ $0.role == .composer && $0.source == .tag }).map(\.name) != names(composers) {
             wrong.append("作曲")
         }
+        if let key = edit.ncmKey, meta.ncmKey != key { wrong.append("163 key") }
         if let lyrics = edit.lyrics, meta.lyrics != lyrics.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters)) { wrong.append("歌词") }
         if let cover = edit.cover {
             let data = try await raw.cover.asyncMap { try await TagReader.coverData(temp, $0) }
@@ -103,11 +104,11 @@ private enum TagFile {
     case flac(FLACTagFile)
     case id3(ID3TagFile)
 
-    init(_ url: URL) throws {
+    init(_ url: URL, discarding: Bool = false) throws {
         let source = try FileSource(url: url)
         switch url.pathExtension.lowercased() {
         case "flac": self = .flac(try FLACTagFile(source))
-        case "mp3": self = .id3(try ID3TagFile(source))
+        case "mp3": self = .id3(try ID3TagFile(source, discarding: discarding))
         case let other: throw TagWriteError.unsupported("暂不支持写入 \(other.uppercased()) 文件")
         }
     }

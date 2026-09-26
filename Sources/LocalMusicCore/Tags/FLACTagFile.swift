@@ -34,7 +34,9 @@ struct FLACTagFile {
     }
 
     mutating func apply(_ edit: TagEdit) throws {
-        var comments = try blocks.firstIndex { $0.type == 4 }.map { try Comments(blocks[$0].body) } ?? Comments()
+        if edit.replaceAll { blocks.removeAll { $0.type == 6 } }
+        // Comments about to be replaced aren't parsed (a damaged block mustn't stop the write).
+        var comments = edit.replaceAll ? Comments() : try blocks.firstIndex { $0.type == 4 }.map { try Comments(blocks[$0].body) } ?? Comments()
         if let title = edit.title { comments.set(["TITLE"], [title]) }
         if let artists = edit.artists { comments.set(["ARTIST"], artists) }
         if let album = edit.album { comments.set(["ALBUM"], [album]) }
@@ -45,6 +47,7 @@ struct FLACTagFile {
         if let genre = edit.genre { comments.set(["GENRE"], [genre]) }
         if let composers = edit.composers { comments.set(["COMPOSER"], composers) }
         if let lyrics = edit.lyrics { comments.set(["LYRICS", "UNSYNCEDLYRICS", "UNSYNCED LYRICS"], [lyrics]) }
+        if let key = edit.ncmKey { comments.set(["DESCRIPTION"], [key]) }
         let body = comments.serialized()
         guard body.count < Self.maxBlock else { throw TagWriteError.unsupported("标签超过 FLAC 元数据块的上限") }
         if let index = blocks.firstIndex(where: { $0.type == 4 }) {

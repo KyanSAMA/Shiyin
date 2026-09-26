@@ -75,7 +75,8 @@ public struct TrackMetadata: Sendable, Equatable {
                                 trackPeak: tags.first("REPLAYGAIN_TRACK_PEAK").flatMap { Double($0) },
                                 albumGain: Self.decibels(tags.first("REPLAYGAIN_ALBUM_GAIN")),
                                 albumPeak: tags.first("REPLAYGAIN_ALBUM_PEAK").flatMap { Double($0) })
-        ncmKey = tags.first("NCM_KEY")
+        // MP3s carry it as a comment (the ID3 reader files it as NCM_KEY); FLACs as DESCRIPTION or COMMENT.
+        ncmKey = tags.first("NCM_KEY") ?? (tags["DESCRIPTION"] + tags["COMMENT"]).first { $0.hasPrefix(ID3Reader.ncmKeyPrefix) }
 
         let credits = lyrics.flatMap(LRCParser.parse)?.credits ?? LyricCredits()
         func people(_ role: PersonRole, tag key: String, credited: [String]) -> [Person] {

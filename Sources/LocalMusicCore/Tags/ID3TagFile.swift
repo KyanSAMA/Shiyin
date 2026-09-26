@@ -16,9 +16,14 @@ struct ID3TagFile {
     private(set) var frames: [Frame]
     static let growPadding = 4 << 10
 
-    init(_ source: ByteSource) throws {
+    /// `discarding`: its frames are about to be replaced anyway, so any version (or damage) will do; written as v2.3.
+    init(_ source: ByteSource, discarding: Bool = false) throws {
         guard source.size >= 10, case let header = [UInt8](try source.read(at: 0, count: 10)), header.starts(with: Array("ID3".utf8)) else {
             (major, length, frames) = (3, 0, [])
+            return
+        }
+        if discarding {
+            (major, length, frames) = (3, min(try ID3Reader.leadingTagLength(source), source.size), [])
             return
         }
         guard (3...4).contains(header[3]) else { throw TagWriteError.unsupported("不支持 ID3v2.\(header[3]) 标签") }
@@ -62,6 +67,12 @@ struct ID3TagFile {
     }
 
     mutating func apply(_ edit: TagEdit) {
+        if edit.replaceAll { frames.removeAll { $0.id.hasPrefix("T") || ["COMM", "USLT", "APIC"].contains($0.id) } }
+        if let key = edit.ncmKey {
+            let keys = frames.indices.filter { frames[$0].id == "COMM" && content(frames[$0]).map { String(decoding: $0, as: UTF8.self).contains(ID3Reader.ncmKeyPrefix) } == true }
+            for index in keys.reversed() { frames.remove(at: index) }
+            frames.append(Frame(id: "COMM", flags: [0, 0], body: Data([0]) + Data("XXX".utf8) + Data([0]) + Data(key.utf8)))
+        }
         if let title = edit.title { set(["TIT2"], text("TIT2", title)) }
         if let artists = edit.artists { set(["TPE1"], text("TPE1", artists.joined(separator: "/"))) }
         if let album = edit.album { set(["TALB"], text("TALB", album)) }

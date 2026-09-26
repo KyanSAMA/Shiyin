@@ -43,6 +43,10 @@ public struct TagEdit: Sendable, Equatable {
     public var composers: [String]?
     public var lyrics: String?
     public var cover: Cover?
+    /// NetEase's "163 key(Don't modify):…" (an MP3 comment, FLAC DESCRIPTION): the song's NetEase id for later lookups.
+    public var ncmKey: String?
+    /// Drop the file's own tags, comments, lyrics and pictures first (the audio inside an .ncm carries junk ones).
+    public var replaceAll = false
 
     public init() {}
 

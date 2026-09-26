@@ -13,6 +13,8 @@ import LocalMusicCore
 //   lmtool write-tags <file> --backup <json> [--set title|artists|album|albumArtist|trackNo|discNo|year|genre|composers=<value>]...
 //          [--cover <image>] [--lyrics <file>]   (artists / composers split on "/"; never under ~/Music)
 //   lmtool restore-tags <file> --backup <json>
+//   lmtool ncm <file.ncm> [--out <dir>] [--fill]   (metadata as JSON; --out puts the tagged FLAC / MP3 there, named
+//          like an import; --fill asks NetEase (live) for track, year, lyrics and a missing cover; never under ~/Music)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -201,7 +203,7 @@ func writableCopy(_ path: String) throws -> URL {
     // Case-insensitive, and past the Data-volume firmlink.
     func folded(_ path: String) -> String { path.replacing(/^\/System\/Volumes\/Data/, with: "").lowercased() }
     let music = folded(FileManager.default.homeDirectoryForCurrentUser.appending(path: "Music").resolvingSymlinksInPath().path + "/")
-    guard !folded(url.path).hasPrefix(music) else { throw TagWriteError.unsupported("拒绝写入 ~/Music 下的文件") }
+    guard !folded(url.path + "/").hasPrefix(music) else { throw TagWriteError.unsupported("拒绝写入 ~/Music 下的文件") }
     return url
 }
 
@@ -249,6 +251,34 @@ func restoreTags(_ path: String, backup: String) async throws {
     emit(["size": version.size, "mtime": version.mtime])
 }
 
+func ncm(_ arguments: [String]) async throws {
+    let url = URL(filePath: arguments[0]), file = try NCMFile(url), format = try file.audioFormat()
+    let out = arguments.firstIndex(of: "--out").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }, fill = arguments.contains("--fill")
+    var info: [String: Any] = ["format": format, "hasCover": file.cover != nil, "musicId": value(file.meta?.musicId),
+                               "title": value(file.meta?.title), "artists": file.meta?.artists ?? [], "album": value(file.meta?.album)]
+    guard let out else { return emit(info) }
+    let folder = try writableCopy(out)
+    var song: OnlineSong?, lyrics: String?, cover = file.cover
+    if fill, let id = file.meta?.musicId {
+        let client = OnlineClient()
+        song = try await client.neteaseSong(id)
+        if let song {
+            lyrics = try await client.lyrics(song)
+            if cover == nil { cover = try await client.cover(song) }
+        }
+    }
+    let sidecar = url.deletingPathExtension().appendingPathExtension("lrc")
+    if lyrics == nil, let text = try? String(contentsOf: sidecar, encoding: .utf8) { lyrics = NCMFile.lyrics(fromSidecar: text) }
+    let edit = Importer.ncmEdit(file.meta, song: song, lyrics: lyrics, cover: cover)
+    let staged = Importer.staging(in: folder, ext: format)
+    defer { try? FileManager.default.removeItem(at: staged) }
+    try file.decrypt(to: staged)
+    let names = ImportNaming.title.candidates(title: edit.title ?? url.deletingPathExtension().lastPathComponent, artists: edit.artists ?? [],
+                                              album: edit.album, trackNo: edit.trackNo, ext: format)
+    info["placed"] = try await Importer.place(staged, edit: edit, in: folder, candidates: names).path
+    emit(info)
+}
+
 switch arguments.first {
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
@@ -262,6 +292,8 @@ case "scan" where arguments.count >= 2:
     try await scan(arguments[1], Array(arguments.dropFirst(2)))
 case "online" where arguments.count > 2:
     try await online(Array(arguments.dropFirst()))
+case "ncm" where arguments.count > 1:
+    try await ncm(Array(arguments.dropFirst()))
 case "write-tags" where arguments.count > 1:
     try await writeTags(Array(arguments.dropFirst()))
 case "restore-tags" where arguments.count == 4 && arguments[2] == "--backup":
