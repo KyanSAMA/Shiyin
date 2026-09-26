@@ -7,8 +7,8 @@ struct PlayerBarView: View {
     var body: some View {
         HStack(spacing: 16) {
             if let player = model.player {
-                NowPlayingSummary(player: player, artwork: model.artwork, ui: model.ui)
-                    .frame(width: 260, alignment: .leading)
+                NowPlayingSummary(player: player, artwork: model.artwork, ui: model.ui, library: model.library)
+                    .frame(width: 300, alignment: .leading)
                 Spacer(minLength: 0)
                 VStack(spacing: 2) {
                     TransportControls(player: player)
@@ -32,6 +32,7 @@ private struct NowPlayingSummary: View {
     let player: PlayerModel
     let artwork: ArtworkStore
     let ui: UIState
+    let library: LibraryModel?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -43,7 +44,7 @@ private struct NowPlayingSummary: View {
             .help("播放页")
             VStack(alignment: .leading, spacing: 2) {
                 Text(player.current?.title ?? "未在播放")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(player.current == nil ? .secondary : .primary)
                 if let notice = player.skipNotice {
                     Label(notice, systemImage: "exclamationmark.triangle.fill")
@@ -51,11 +52,13 @@ private struct NowPlayingSummary: View {
                         .foregroundStyle(.orange)
                 } else {
                     Text(player.current?.artistText ?? "")
-                        .font(.system(size: 11))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
             }
             .lineLimit(1)
+            // Beside the title and artist; always there (disabled without a track).
+            if let library { LikeButton(library: library, track: player.current?.id, side: 34).font(.system(size: 19, weight: .semibold)) }
         }
     }
 }
@@ -114,8 +117,6 @@ private struct PageToggles: View {
     var body: some View {
         let ui = model.ui
         HStack(spacing: 2) {
-            // Always there (disabled without a track), so the centred transport doesn't shift when playback starts.
-            if let library = model.library { LikeButton(library: library, track: current) }
             Button { ui.nowPlayingShown.toggle() } label: { Label("歌词", systemImage: "quote.bubble") }
                 .foregroundStyle(ui.nowPlayingShown ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .disabled(current == nil)

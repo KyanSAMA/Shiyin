@@ -60,6 +60,7 @@ struct EnrichView: View {
                     }
                     if !picked.isEmpty {
                         Divider()
+                        Button("在访达中显示") { revealInFinder(picked) }
                         Button("写入文件…") { Task { await model.planTagWrite(picked) } }
                         if let backedUp = model.library?.backedUp, !backedUp.isEmpty, picked.contains(where: { backedUp.contains($0.path) }) {
                             Button("恢复原标签…") { model.planTagRestore(picked) }
