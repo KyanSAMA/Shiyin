@@ -27,15 +27,25 @@ struct LaunchOptions {
     }
 
     var isSelfTest: Bool { selfTestScript != nil }
+
+    /// The self-test's own folder (its data dir's parent), the only place self-tests import from, download to or trash to.
+    var selfTestRoot: String? { isSelfTest ? dataDir.map { canonicalPath($0.deletingLastPathComponent().path) } : nil }
+
+    /// Outside self-tests, anywhere.
+    func allowsFiles(at path: String) -> Bool {
+        guard let root = selfTestRoot else { return true }
+        let path = canonicalPath(path)
+        return path == root || path.hasPrefix(root + "/")
+    }
 }
 
 enum SidebarItem: Hashable, Identifiable {
-    case songs, albums, artists, composers, recent, liked, enrich, neteaseImport
+    case songs, albums, artists, composers, recent, liked, enrich, neteaseImport, siren
     case playlist(Int64)
 
     static let library: [Self] = [.songs, .albums, .artists, .composers]
     static let presets: [Self] = [.recent, .liked]
-    static let tools: [Self] = [.enrich, .neteaseImport]
+    static let tools: [Self] = [.enrich, .neteaseImport, .siren]
 
     var id: Self { self }
 
@@ -55,6 +65,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .liked: "liked"
         case .enrich: "enrich"
         case .neteaseImport: "netease"
+        case .siren: "siren"
         case .playlist: "playlist"
         }
     }
@@ -69,6 +80,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .liked: "喜欢的歌曲"
         case .enrich: "信息补全"
         case .neteaseImport: "网易云导入"
+        case .siren: "塞壬唱片"
         case .playlist: "播放列表"
         }
     }
@@ -83,6 +95,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .liked: "heart"
         case .enrich: "wand.and.sparkles"
         case .neteaseImport: "square.and.arrow.down"
+        case .siren: "opticaldisc"
         case .playlist: "music.note.list"
         }
     }
@@ -106,9 +119,9 @@ enum Route: Hashable {
     case album(String)
 }
 
-/// 编辑信息, 选择匹配, 写入文件 or 迁移; one slot, so one can hand over to another.
+/// 编辑信息, 选择匹配, 写入文件, 迁移 or 下载; one slot, so one can hand over to another.
 enum SongSheet: Identifiable {
-    case editor(InfoEditor), picker(MatchPicker), write(TagWritePlan), importPlan(ImportPlan)
+    case editor(InfoEditor), picker(MatchPicker), write(TagWritePlan), importPlan(ImportPlan), sirenPlan(SirenPlan)
 
     var id: ObjectIdentifier {
         switch self {
@@ -116,6 +129,7 @@ enum SongSheet: Identifiable {
         case .picker(let picker): ObjectIdentifier(picker)
         case .write(let plan): ObjectIdentifier(plan)
         case .importPlan(let plan): ObjectIdentifier(plan)
+        case .sirenPlan(let plan): ObjectIdentifier(plan)
         }
     }
 
@@ -243,6 +257,7 @@ enum SongSheet: Identifiable {
     let loudness: LoudnessModel?
     let enrich: EnrichModel?
     let importer: ImportModel?
+    let siren: SirenModel?
     let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
@@ -254,7 +269,7 @@ enum SongSheet: Identifiable {
         self.options = options
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
         artwork = ArtworkStore(cache: ArtworkCache(directory: paths.cache.appending(path: "artwork")))
-        var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?, enrich: EnrichModel?
+        var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?, enrich: EnrichModel?, client: OnlineClient?
         do {
             let store = try LibraryStore(url: paths.database)
             library = LibraryModel(store: store)
@@ -266,9 +281,8 @@ enum SongSheet: Identifiable {
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
             let fixtures = options.onlineFixturesDir
-            enrich = library.map { EnrichModel(store: store, library: $0,
-                                 client: OnlineClient(configuration: fixtures.map(OnlineFixtures.configuration) ?? .ephemeral),
-                                 interval: fixtures == nil ? .milliseconds(600) : .zero) }
+            client = OnlineClient(configuration: fixtures.map(OnlineFixtures.configuration) ?? .ephemeral)
+            enrich = library.map { EnrichModel(store: store, library: $0, client: client!, interval: fixtures == nil ? .milliseconds(600) : .zero) }
         } catch {
             startupError = String(describing: error)
         }
@@ -278,6 +292,9 @@ enum SongSheet: Identifiable {
         self.enrich = enrich
         let importer = library.map { ImportModel(library: $0, enrich: enrich, options: options) }
         self.importer = importer
+        siren = library.flatMap { library in
+            importer.flatMap { importer in client.map { SirenModel(client: $0, library: library, importer: importer, options: options) } }
+        }
         if let library, let importer {
             let reloaded = library.onReload
             library.onReload = { [weak importer] in

@@ -15,6 +15,8 @@ import LocalMusicCore
 //   lmtool restore-tags <file> --backup <json>
 //   lmtool ncm <file.ncm> [--out <dir>] [--fill]   (metadata as JSON; --out puts the tagged FLAC / MP3 there, named
 //          like an import; --fill asks NetEase (live) for track, year, lyrics and a missing cover; never under ~/Music)
+//   lmtool siren albums | album <cid> | get <song cid> <dir>   (塞壬唱片, live; `get` downloads the song into <dir> as an
+//          import would — WAV as FLAC, tagged; never under ~/Music)
 
 func value<T>(_ optional: T?) -> Any { optional.map { $0 as Any } ?? NSNull() }
 
@@ -279,7 +281,35 @@ func ncm(_ arguments: [String]) async throws {
     emit(info)
 }
 
+func siren(_ arguments: [String]) async throws {
+    let client = OnlineClient()
+    switch (arguments.first, arguments.count) {
+    case ("albums", 1):
+        let albums = try await client.sirenAlbums()
+        emit(albums.map { ["cid": $0.id, "name": $0.name, "artists": $0.artists] })
+    case ("album", 2):
+        let detail = try await client.sirenAlbum(arguments[1])
+        emit(["name": detail.album.name, "intro": detail.intro, "cover": value(detail.album.coverURL?.absoluteString),
+              "songs": detail.songs.map { ["cid": $0.id, "name": $0.name, "artists": $0.artists] }])
+    case ("get", 3):
+        let folder = try writableCopy(arguments[2])
+        let songs = try await client.sirenSongs()
+        guard let song = songs.first(where: { $0.id == arguments[1] }) else { throw OnlineError.malformed }
+        let detail = try await client.sirenAlbum(song.albumID)
+        let cover = try await client.sirenCover(detail.album)
+        let started = Date()
+        let placed = try await Siren.download(song, in: detail, cover: cover, client: client, to: folder, naming: .title) { received, expected in
+            FileHandle.standardError.write(Data("\r\(received / 1024) / \(expected.map { String($0 / 1024) } ?? "?") KB".utf8))
+        }
+        emit(["placed": placed.path, "seconds": Date().timeIntervalSince(started)])
+    default:
+        throw TagWriteError.unsupported("lmtool siren albums | album <cid> | get <song cid> <dir>")
+    }
+}
+
 switch arguments.first {
+case "siren" where arguments.count > 1:
+    try await siren(Array(arguments.dropFirst()))
 case "tags" where arguments.count > 1:
     await tags(Array(arguments.dropFirst()))
 case "lrc" where arguments.count == 2:
@@ -299,6 +329,6 @@ case "write-tags" where arguments.count > 1:
 case "restore-tags" where arguments.count == 4 && arguments[2] == "--backup":
     try await restoreTags(arguments[1], backup: arguments[3])
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file> | lmtool write-tags <file> --backup <json> [--set k=v]... [--cover img] [--lyrics file] | lmtool restore-tags <file> --backup <json>\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file> | lmtool write-tags <file> --backup <json> [--set k=v]... [--cover img] [--lyrics file] | lmtool restore-tags <file> --backup <json> | lmtool ncm <file.ncm> [--out <dir>] [--fill] | lmtool siren albums | album <cid> | get <cid> <dir>\n".utf8))
     exit(64)
 }

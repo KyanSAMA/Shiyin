@@ -47,6 +47,19 @@ public enum OnlineError: Error, Equatable {
     case http(Int)
     case api(Int)
     case malformed
+    /// A download couldn't be written, or came short.
+    case file(String)
+}
+
+extension OnlineError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .http(let status): "服务器返回 HTTP \(status)"
+        case .api(let code): "接口返回错误 \(code)"
+        case .malformed: "返回的内容无法解析"
+        case .file(let reason): reason
+        }
+    }
 }
 
 /// Song search, lyrics and covers from NetEase Cloud Music and QQ Music (unofficial web APIs that need a browser
@@ -54,7 +67,7 @@ public enum OnlineError: Error, Equatable {
 /// ids are sent.
 public struct OnlineClient: Sendable {
     static let browserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-    private let session: URLSession
+    let session: URLSession
 
     /// Tests and self-tests pass a configuration whose `protocolClasses` serve recorded responses.
     public init(configuration: URLSessionConfiguration = .ephemeral) {

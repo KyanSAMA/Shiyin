@@ -1,0 +1,182 @@
+{
+  "timeout": 90,
+  "window": {
+    "width": 1440,
+    "height": 900
+  },
+  "steps": [
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/library/mp3/直到大地变成一颗酸橙.mp3",
+      "to": "@out/lib/直到大地变成一颗酸橙.mp3"
+    },
+    {
+      "do": "startLibrary",
+      "include": [
+        "@out/lib"
+      ]
+    },
+    {
+      "do": "sidebar",
+      "value": "siren"
+    },
+    {
+      "do": "sirenAlbum",
+      "name": "直到大地变成一颗酸橙OST"
+    },
+    {
+      "do": "assert",
+      "path": "siren.albums.直到大地变成一颗酸橙OST",
+      "equals": "1/2"
+    },
+    {
+      "do": "assert",
+      "path": "siren.albums.月明人间",
+      "equals": "0/1"
+    },
+    {
+      "do": "assert",
+      "path": "siren.songs.直到大地变成一颗酸橙.owned",
+      "equals": [
+        "mp3"
+      ]
+    },
+    {
+      "do": "assert",
+      "path": "siren.songs.用不上的雨刷.owned",
+      "equals": []
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "siren-light"
+    },
+    {
+      "do": "downloadSiren",
+      "titles": [
+        "用不上的雨刷",
+        "直到大地变成一颗酸橙"
+      ],
+      "naming": "albumTrack",
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "siren.plan.count",
+      "equals": 2
+    },
+    {
+      "do": "snapshot",
+      "name": "siren-sheet",
+      "window": "sheet"
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "downloadSiren",
+      "titles": [
+        "用不上的雨刷",
+        "直到大地变成一颗酸橙"
+      ],
+      "naming": "albumTrack"
+    },
+    {
+      "do": "assert",
+      "path": "siren.songs.用不上的雨刷.state",
+      "equals": "done: lib/直到大地变成一颗酸橙OST/01 用不上的雨刷.mp3"
+    },
+    {
+      "do": "assert",
+      "path": "siren.songs.直到大地变成一颗酸橙.state",
+      "equals": "done: lib/直到大地变成一颗酸橙OST/02 直到大地变成一颗酸橙.flac"
+    },
+    {
+      "do": "readFile",
+      "path": "@out/lib/直到大地变成一颗酸橙OST/02 直到大地变成一颗酸橙.flac",
+      "as": "flac"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.TITLE",
+      "equals": "直到大地变成一颗酸橙"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.ALBUM",
+      "equals": "直到大地变成一颗酸橙OST"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.ALBUMARTIST",
+      "equals": "塞壬唱片-MSR"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.TRACKNUMBER",
+      "equals": "2"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.LYRICS",
+      "equals": "[00:00.100]音乐设计/监制: MSR Studio\n[00:00.300]Beyond silent skies"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.flac.hasCover",
+      "equals": true
+    },
+    {
+      "do": "readFile",
+      "path": "@out/lib/直到大地变成一颗酸橙OST/01 用不上的雨刷.mp3",
+      "as": "mp3"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.mp3.ALBUM",
+      "equals": "直到大地变成一颗酸橙OST"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.mp3.hasCover",
+      "equals": true
+    },
+    {
+      "do": "assert",
+      "path": "siren.albums.直到大地变成一颗酸橙OST",
+      "equals": "2/2"
+    },
+    {
+      "do": "assert",
+      "path": "siren.songs.直到大地变成一颗酸橙.owned",
+      "equals": [
+        "flac",
+        "mp3"
+      ]
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "siren-after"
+    },
+    {
+      "do": "appearance",
+      "value": "dark"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "siren-dark"
+    }
+  ]
+}

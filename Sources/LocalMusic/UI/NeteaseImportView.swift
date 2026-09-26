@@ -143,31 +143,10 @@ struct ImportPlanView: View {
 
     var body: some View {
         let target = plan.target ?? importer.firstFolder
-        let roots = model.library?.roots.include ?? []
-        let outside = target.map { url in !roots.contains { url.path == $0 || url.path.hasPrefix($0 + "/") } } ?? false
         VStack(alignment: .leading, spacing: 0) {
             Form {
                 Section {
-                    LabeledContent("导入到") {
-                        HStack {
-                            Text(target.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "还没有音乐文件夹")
-                                .lineLimit(1).truncationMode(.middle)
-                            Menu("更改") {
-                                Button("第一个音乐文件夹") { plan.target = nil }.disabled(importer.firstFolder == nil)
-                                Button("其他文件夹…") { if let url = chooseFolder(prompt: "导入到这里") { plan.target = url } }
-                            }
-                            .fixedSize()
-                        }
-                    }
-                    if outside, let target {
-                        HStack {
-                            Label("这个文件夹不在音乐文件夹里，导入的歌不会出现在曲库", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
-                            Spacer()
-                            Button("添加到音乐文件夹") { Task { await model.library?.add(target, excluded: false) } }
-                        }
-                        .font(.system(size: 12))
-                    }
+                    ImportTargetRows(model: model, importer: importer, target: Binding(get: { plan.target }, set: { plan.target = $0 }))
                     Picker("文件命名", selection: Binding(get: { plan.naming }, set: { plan.naming = $0 })) {
                         ForEach(ImportNaming.allCases, id: \.self) { Text($0.example).tag($0) }
                     }
@@ -209,6 +188,39 @@ struct ImportPlanView: View {
             .padding(20)
         }
         .frame(width: 600, height: 520)
+    }
+}
+
+/// 导入到: the first music folder or another, with a warning (and a fix) when it's outside the music folders.
+struct ImportTargetRows: View {
+    let model: AppModel
+    let importer: ImportModel
+    @Binding var target: URL?
+
+    var body: some View {
+        let resolved = target ?? importer.firstFolder
+        let roots = model.library?.roots.resolved.include ?? []
+        let outside = resolved.map { url in !roots.contains { canonicalPath(url.path) == $0 || canonicalPath(url.path).hasPrefix($0 + "/") } } ?? false
+        LabeledContent("导入到") {
+            HStack {
+                Text(resolved.map { ($0.path as NSString).abbreviatingWithTildeInPath } ?? "还没有音乐文件夹")
+                    .lineLimit(1).truncationMode(.middle)
+                Menu("更改") {
+                    Button("第一个音乐文件夹") { target = nil }.disabled(importer.firstFolder == nil)
+                    Button("其他文件夹…") { if let url = chooseFolder(prompt: "导入到这里") { target = url } }
+                }
+                .fixedSize()
+            }
+        }
+        if outside, let resolved {
+            HStack {
+                Label("这个文件夹不在音乐文件夹里，导入的歌不会出现在曲库", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Spacer()
+                Button("添加到音乐文件夹") { Task { await model.library?.add(resolved, excluded: false) } }
+            }
+            .font(.system(size: 12))
+        }
     }
 }
 

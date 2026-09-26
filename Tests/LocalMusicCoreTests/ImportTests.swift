@@ -87,8 +87,11 @@ struct NCMTests {
         #expect(meta.title == "歌" && meta.names(.artist) == ["甲"] && meta.ncmKey.flatMap(NCMKey.songID) == 418602075)
         #expect(try Data(contentsOf: source) == before)
 
-        try Data().write(to: Importer.staging(in: target, ext: ext))
+        let (old, fresh) = (Importer.staging(in: target, ext: ext), Importer.staging(in: target, ext: ext))
+        try Data().write(to: old)
+        try Data().write(to: fresh)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: old.path)
         Importer.sweepStaging(in: target)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).sorted() == ["歌 (专辑).\(ext)", "歌.\(ext)"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target.path).sorted() == ["歌 (专辑).\(ext)", "歌.\(ext)", fresh.lastPathComponent].sorted())
     }
 }

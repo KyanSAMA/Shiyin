@@ -201,6 +201,31 @@ final class SelfTestRunner {
                 await importer.finish()
                 try await settle()
             }
+        case "sirenAlbum":
+            // Loads the catalogue and opens the album `name`.
+            guard let siren = model.siren else { throw SelfTestFailure(description: "no siren") }
+            await siren.load()
+            let name = try step.required("name")
+            guard let album = siren.albums.first(where: { $0.name == name }) else { throw SelfTestFailure(description: "no album \(name)") }
+            siren.select(album.id)
+            if siren.detail == nil { await siren.loadDetail(album.id) }
+            try await settle()
+        case "downloadSiren":
+            // Plans 下载 for the open album's `titles` (else the songs not in the library), with `target` / `naming` over the
+            // defaults; unless `keepOpen`, starts it and waits for the queue.
+            guard let siren = model.siren, let detail = siren.detail else { throw SelfTestFailure(description: "no open album") }
+            let titles = step["titles"] as? [String]
+            let plan = siren.plan(detail.songs.filter { titles?.contains($0.name) ?? siren.owned($0).isEmpty }, in: detail)
+            if let target = step.string("target") { plan.target = target == "first" ? nil : URL(filePath: resolve(target)) }
+            if let naming = step.string("naming").flatMap(ImportNaming.init) { plan.naming = naming }
+            model.ui.sheet = .sirenPlan(plan)
+            try await settle()
+            if step["keepOpen"] as? Bool != true {
+                model.ui.sheet = nil
+                siren.start(plan)
+                await siren.finish()
+                try await settle()
+            }
         case "promptPlaylist":
             if let name = step.string("rename") { model.promptRenamePlaylist(try playlist(name)) } else { model.promptNewPlaylist(try trackIDs(step)) }
             try await settle()
@@ -624,6 +649,7 @@ final class SelfTestRunner {
             case .enrich:
                 return ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, model.enrich?.match($0), backedUp: model.library?.backedUp ?? []) }.map(\.title)
             case .neteaseImport: return model.importer?.sources.map(\.title) ?? []
+            case .siren: return model.siren?.detail?.songs.map(\.name) ?? []
             case .playlist(let id):
                 return ui.narrowed(model.library?.playlist(id)?.trackIDs.compactMap { index.tracks[$0] } ?? [], in: index).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)
@@ -679,6 +705,31 @@ final class SelfTestRunner {
         return ["folder": importer.settings.neteaseFolder, "running": importer.running, "plan": plan, "sources": sources,
                 "count": importer.sources.count, "trashed": trashed,
                 "processed": Dictionary(importer.processed.map { ($0.source.title, describe($0.source, $0.state)) }, uniquingKeysWith: { _, b in b })]
+    }
+
+    private func sirenState(_ siren: SirenModel) -> Step {
+        var albums: Step = [:], songs: Step = [:]
+        for album in siren.albums {
+            let count = siren.ownedCount(album)
+            albums[album.name] = "\(count.owned)/\(count.total)"
+        }
+        for song in siren.detail?.songs ?? [] {
+            let owned = siren.owned(song)
+            let state: String = switch siren.states[song.id] {
+            case .queued?: "queued"
+            case .downloading?: "downloading"
+            case .done(let url)?: "done: " + url.path.replacingOccurrences(of: out.path + "/", with: "")
+            case .failed(let reason)?: "failed: " + reason
+            case nil: ""
+            }
+            songs[song.name] = ["owned": owned.map(\.format).sorted(), "state": state] as Step
+        }
+        var plan: Any = NSNull()
+        if case .sirenPlan(let open)? = model.ui.sheet {
+            plan = ["count": open.songs.count, "target": open.target?.path ?? "first", "naming": open.naming.rawValue] as Step
+        }
+        return ["albums": albums, "album": siren.detail?.album.name ?? NSNull(), "songs": songs, "running": siren.running,
+                "failure": siren.failure ?? NSNull(), "plan": plan]
     }
 
     private func library() throws -> LibraryModel {
@@ -847,6 +898,7 @@ final class SelfTestRunner {
             "editor": model.ui.sheet?.editor.map(editorState) ?? NSNull(),
             "fileTags": fileTags,
             "import": model.importer.map(importState) ?? NSNull(),
+            "siren": model.siren.map(sirenState) ?? NSNull(),
             "tagPlan": model.ui.sheet?.plan.map { plan in
                 ["items": Dictionary(plan.items.map { ($0.row.title, ["changes": plan.changes($0).map(\.field.rawValue), "skip": $0.skip ?? NSNull()] as Step) },
                                      uniquingKeysWith: { first, _ in first }),

@@ -111,19 +111,13 @@ struct OnlineTests {
         """#
 
     private func client() throws -> OnlineClient {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "lm-online-\(UUID().uuidString)")
-        for (file, body) in [("netease/search/群青 YOASOBI.json", Self.search), ("netease/song/418602075.json", Self.detail),
+        try OnlineTestFixtures.client([("netease/search/群青 YOASOBI.json", Self.search), ("netease/song/418602075.json", Self.detail),
                              ("netease/lyric/418602075.json", Self.lyric), ("qq/search/浸春芜.json", Self.qqSearch),
                              ("qq/lyric/001V1NtH360djY.json", Self.qqLyric), ("itunes/浸春芜.json", Self.itunes), ("lrclib/群青.json", Self.lrclib),
                              ("qq/lyric/x.json", #"{"retcode":0,"code":0,"lyric":"[00:00:00]此歌曲为没有填词的纯音乐，请您欣赏"}"#),
                              ("qq/search/Tone Tester.json", Self.toneQQ), ("itunes/Tone Tester.json", Self.toneITunes),
                              ("lrclib/Tone Tester.json", Self.toneLRCLib), ("netease/search/Broken Tester.json", "<html>captcha</html>"),
-                             ("cover.jpg", "jpeg")] {
-            let url = directory.appending(path: file)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(body.utf8).write(to: url)
-        }
-        return OnlineClient(configuration: OnlineFixtures.configuration(directory: directory))
+                             ("cover.jpg", "jpeg")].map { ($0.0, Data($0.1.utf8)) })
     }
 
     @Test func parsesSearchDetailAndMergedLyrics() async throws {

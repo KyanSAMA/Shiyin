@@ -2,7 +2,8 @@ import Foundation
 
 /// Serves recorded responses from a directory instead of the network, for tests and self-tests:
 /// `netease/search/<keywords>.json`, `netease/song/<id>.json`, `netease/lyric/<id>.json`, `qq/search/<keywords>.json`,
-/// `qq/lyric/<mid>.json`, `itunes/<keywords>.json`, `lrclib/<keywords>.json`, and `cover.jpg` for any image. A missing
+/// `qq/lyric/<mid>.json`, `itunes/<keywords>.json`, `lrclib/<keywords>.json`, `siren/albums.json`, `siren/songs.json`,
+/// `siren/album/<cid>.json`, `siren/song/<cid>.json`, `siren/audio/<file>`, `siren/lyric/<file>`, and `cover.jpg` for any image. A missing
 /// search or lyric file answers "nothing found"; every request is logged. One directory per process: the latest
 /// `configuration(directory:)` serves every session.
 public final class OnlineFixtures: URLProtocol {
@@ -43,10 +44,15 @@ public final class OnlineFixtures: URLProtocol {
         case ("c.y.qq.com", _): ("qq/lyric/\(query["songmid"] ?? "").json", #"{"retcode":-1901,"code":-1901}"#)
         case ("itunes.apple.com", _): ("itunes/\(query["term"] ?? "").json", #"{"resultCount":0,"results":[]}"#)
         case ("lrclib.net", _): ("lrclib/\(query["q"] ?? "").json", "[]")
+        case ("monster-siren.hypergryph.com", let path?):
+            ("siren/" + path.dropFirst("/api/".count).replacing("/detail", with: "") + ".json", nil)
+        case (_, let path?) where path.contains("/siren/audio/") || path.contains("/siren/lyric/"):
+            ("siren/" + (path.contains("/siren/audio/") ? "audio/" : "lyric/") + (path.split(separator: "/").last ?? ""), nil)
         default: ("cover.jpg", nil)
         }
         let body = directory.flatMap { try? Data(contentsOf: $0.appending(path: file)) } ?? fallback.map { Data($0.utf8) }
-        let response = HTTPURLResponse(url: url, statusCode: body == nil ? 404 : 200, httpVersion: nil, headerFields: nil)!
+        let response = HTTPURLResponse(url: url, statusCode: body == nil ? 404 : 200, httpVersion: nil,
+                                       headerFields: ["Content-Length": String(body?.count ?? 0)])!
         client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client.urlProtocol(self, didLoad: body ?? Data())
         client.urlProtocolDidFinishLoading(self)

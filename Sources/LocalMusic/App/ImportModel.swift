@@ -145,7 +145,7 @@ struct ImportRecord: Identifiable {
     func refresh() async {
         active = true
         let folder = sourceFolder
-        if let root = selfTestRoot, !within(folder.path, root) { return }
+        guard options.allowsFiles(at: folder.path) else { return }
         generation += 1
         let mine = generation
         listing = true
@@ -278,7 +278,8 @@ struct ImportRecord: Identifiable {
         }
         guard plan.trashOriginals else { return .done(placed, note: nil) }
         // A FLAC / MP3 inside a music folder is a library track: trashing it would drop its likes and playlists.
-        if !source.isNCM, library.roots.include.contains(where: { within(source.url.path, canonicalPath($0)) }) {
+        let path = canonicalPath(source.url.path)
+        if !source.isNCM, library.roots.resolved.include.contains(where: { path.hasPrefix($0 + "/") }) {
             return .done(placed, note: "原文件在音乐文件夹里，没有移到废纸篓")
         }
         do {
@@ -335,7 +336,7 @@ struct ImportRecord: Identifiable {
     private func trash(original url: URL) async throws {
         let stem = url.deletingPathExtension()
         let others = ["ncm", "flac", "mp3"].map { stem.appendingPathExtension($0) }.filter { $0 != url }
-        let bin = selfTestRoot.map { URL(filePath: $0).appending(path: "Trash") }
+        let bin = options.selfTestRoot.map { URL(filePath: $0).appending(path: "Trash") }
         try await Task.detached {
             let fm = FileManager.default
             var files = [url]
@@ -353,19 +354,7 @@ struct ImportRecord: Identifiable {
         }.value
     }
 
-    /// Self-tests import only within their own folder.
     private func allowed(_ source: ImportSource, _ target: URL) -> Bool {
-        guard let root = selfTestRoot else { return true }
-        return within(source.url.path, root) && within(target.path, root)
-    }
-
-    /// The self-test's own folder (its data dir's parent).
-    private var selfTestRoot: String? {
-        options.isSelfTest ? options.dataDir.map { canonicalPath($0.deletingLastPathComponent().path) } : nil
-    }
-
-    private func within(_ path: String, _ root: String) -> Bool {
-        let path = canonicalPath(path)
-        return path == root || path.hasPrefix(root + "/")
+        options.allowsFiles(at: source.url.path) && options.allowsFiles(at: target.path)
     }
 }

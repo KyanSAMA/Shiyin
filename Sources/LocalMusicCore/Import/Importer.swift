@@ -30,11 +30,15 @@ public enum Importer {
         folder.appending(path: "\(stagingMarker)\(UUID().uuidString.prefix(8)).\(ext)")
     }
 
-    /// Staging files a crash left behind (and a tag write's temp file beside one); only while no import is running.
+    /// Staging files a crash left behind (and a tag write's temp file beside one): untouched for an hour, so a download
+    /// or import still writing into the folder keeps its own.
     public static func sweepStaging(in folder: URL) {
         for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         where name.hasPrefix(stagingMarker) || name.hasPrefix("." + stagingMarker) {
-            try? FileManager.default.removeItem(at: folder.appending(path: name))
+            let url = folder.appending(path: name)
+            guard let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                  modified < Date(timeIntervalSinceNow: -3600) else { continue }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
