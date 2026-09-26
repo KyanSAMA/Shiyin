@@ -45,14 +45,22 @@ struct EnrichView: View {
                 List(rows, selection: $ui.enrichSelection) { row in
                     EnrichRow(store: model.artwork, row: row, match: enrich.match(row),
                               applying: row.fingerprint.map(enrich.applying.contains) ?? false) { choose(row) }
-                        .contextMenu {
-                            Button("选择匹配…") { choose(row) }
-                            Button("编辑信息…") { Task { await model.editInfo([row]) } }
-                            Button("重新查找") { enrich.enrich([row]) }
-                            if let status = enrich.match(row)?.status, status != .rejected {
-                                Button(status.rejectTitle) { Task { await enrich.reject(row) } }
-                            }
+                }
+                .contextMenu(forSelectionType: Int64.self) { ids in
+                    let picked = rows.filter { ids.contains($0.id) }
+                    if picked.count == 1, let row = picked.first {
+                        Button("选择匹配…") { choose(row) }
+                        Button("编辑信息…") { Task { await model.editInfo([row]) } }
+                        Button("重新查找") { enrich.enrich([row]) }
+                        if let status = enrich.match(row)?.status, status != .rejected {
+                            Button(status.rejectTitle) { Task { await enrich.reject(row) } }
                         }
+                    } else if !picked.isEmpty {
+                        Button("重新查找") { enrich.enrich(picked) }
+                    }
+                } primaryAction: { ids in
+                    // Double-click or Return plays from that song through the list.
+                    if let index = rows.firstIndex(where: { ids.contains($0.id) }) { model.player?.play(rows.map(\.id), startAt: index) }
                 }
                 .id(ui.listID + [ui.enrichFilter])
             }
