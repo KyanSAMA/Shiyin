@@ -132,7 +132,9 @@ public actor EnrichService {
                     failures.append(String(describing: error))
                 }
             }
-            for source in job.sources where layers[source] == nil && !gaps.isDisjoint(with: source.fills) && (source != .lrclib || !applied.isEmpty) {
+            // LRCLIB goes last whatever its place: it only supplements a song another source knows.
+            let order = job.sources.filter { $0 != .lrclib } + job.sources.filter { $0 == .lrclib }
+            for source in order where layers[source] == nil && !gaps.isDisjoint(with: source.fills) && (source != .lrclib || !applied.isEmpty) {
                 asked += 1
                 do {
                     let found = try await paced(source) { try await self.client.search(source, job.query.keywords, storefront: job.storefront) }

@@ -19,7 +19,8 @@ extension OnlineClient {
         let url = Self.url("https://c.y.qq.com", "/lyric/fcgi-bin/fcg_query_lyric_new.fcg", ["songmid": song.id, "format": "json", "nobase64": "1"])
         guard let json = try await json(url, referer: Self.qqReferer) as? [String: Any] else { throw OnlineError.malformed }
         func text(_ key: String) -> String? { (json[key] as? String).map(Self.unescaped).flatMap { $0.isEmpty ? nil : $0 } }
-        guard let lyrics = text("lyric") else { return nil }   // songs without lyrics answer an error code
+        // Songs without lyrics answer an error code; instrumentals, a line saying so.
+        guard let lyrics = text("lyric"), !lyrics.contains("没有填词的纯音乐") else { return nil }
         // The first line repeats "title - artists"; untranslated lines read "//".
         let original = lyrics.split(whereSeparator: \.isNewline).filter { !($0.hasPrefix("[00:00.00]") && $0.dropFirst(10).hasPrefix("\(song.title) - ")) }
         let translation = text("trans")?.split(whereSeparator: \.isNewline).filter { !$0.hasSuffix("]//") }

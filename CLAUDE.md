@@ -16,7 +16,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 零第三方依赖；ffmpeg / ffprobe / metaflac 只用于测试夹具和对照
 - 曲库只读：任何代码路径都不得写入曲库目录
 - 设置存 SQLite `setting` 表，不用 UserDefaults
-- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并
+- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并；各来源接口的注意事项见 `需求与技术路线.md` 4.2
 - 数据库迁移只追加，不修改已提交的迁移
 - 交给 AVFAudio / MediaPlayer / FSEvents 的回调闭包在 `LocalMusicCore` 的非隔离代码或 `nonisolated static` 工厂里构造，只捕获 Sendable 值，再 `Task { @MainActor in … }` 切回
 - App 目标默认 MainActor 隔离；纯逻辑放 `LocalMusicCore` 以便单测
