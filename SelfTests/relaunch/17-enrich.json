@@ -9,6 +9,7 @@
     { "do": "assert", "path": "inspected.春日影.match", "equals": "auto" },
     { "do": "assert", "path": "enrich.confirmed", "equals": ["无标签标题"] },
     { "do": "assert", "path": "enrich.rejected", "equals": ["群青"] },
-    { "do": "assert", "path": "enrich.pending", "equals": [] }
+    { "do": "assert", "path": "enrich.pending", "equals": [] },
+    { "do": "assert", "path": "enrich.sources", "equals": ["netease", "qq", "itunes"] }
   ]
 }

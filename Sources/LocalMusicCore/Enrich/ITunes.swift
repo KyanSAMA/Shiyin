@@ -3,7 +3,7 @@ import Foundation
 /// The iTunes Search API: release dates, track and disc numbers, genres and large covers; no lyrics. Names come as the
 /// store's catalog spells them (a Japanese store writes Chinese titles in traditional characters).
 extension OnlineClient {
-    func itunesSearch(_ keywords: String, limit: Int) async throws -> [OnlineSong] {
+    func itunesSearch(_ keywords: String, limit: Int, storefront: String) async throws -> [OnlineSong] {
         // English genre names; titles and artists stay as the catalog has them.
         let url = Self.url("https://itunes.apple.com", "/search",
                            ["term": keywords, "entity": "song", "country": storefront, "lang": "en_us", "limit": String(limit)])

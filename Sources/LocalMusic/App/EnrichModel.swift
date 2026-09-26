@@ -6,6 +6,8 @@ import LocalMusicCore
 /// results show as they land. Requests made while it runs join the queue.
 @Observable final class EnrichModel {
     private(set) var matches: [String: MatchState] = [:]
+    private(set) var settings = OnlineSettings.default
+    @ObservationIgnored private var settingsChanged = false
     private(set) var progress: (done: Int, total: Int)?
     /// The last run's problem, or a note such as nothing being left to do.
     private(set) var notice: String?
@@ -27,20 +29,39 @@ import LocalMusicCore
         service = EnrichService(store: store, client: client, interval: interval)
         loading = Task { [weak self] in
             guard let self else { return }
-            do { matches = try await store.matches() } catch { notice = String(describing: error) }
+            do {
+                matches = try await store.matches()
+                let saved = try await store.setting(OnlineSettings.key, as: OnlineSettings.self)
+                if !settingsChanged, let saved { settings = saved }
+            } catch {
+                notice = String(describing: error)
+            }
         }
     }
 
     func match(_ row: TrackRow) -> MatchState? { row.fingerprint.flatMap { matches[$0] } }
 
+    /// Takes effect at once, so the next change builds on it; then it's saved and, since the order decides which
+    /// source's value shows, the library refreshed.
+    @discardableResult func setSettings(_ settings: OnlineSettings) -> Task<Void, Never> {
+        self.settings = settings
+        settingsChanged = true
+        return Task {
+            do { try await store.setSetting(OnlineSettings.key, settings) } catch { notice = String(describing: error) }
+            await library.refresh()
+        }
+    }
+
     /// Queues every song still missing something that was never looked up (once the stored matches are known).
     func enrichAll(_ rows: [TrackRow]) async {
         await loading?.value
+        guard !settings.enabled.isEmpty else { notice = "没有启用的在线资料来源，请在设置里开启"; return }
         let todo = rows.filter { match($0) == nil && EnrichFilter.missing($0, checkingFolderArt: true) }
         if todo.isEmpty { notice = "没有需要补全的歌曲" } else { enrich(todo) }
     }
 
     func enrich(_ rows: [TrackRow]) {
+        guard !settings.enabled.isEmpty else { notice = "没有启用的在线资料来源，请在设置里开启"; return }
         // One lookup per recording.
         var seen = Set(queue.compactMap(\.fingerprint))
         let added = rows.filter { $0.fingerprint.map { seen.insert($0).inserted } ?? false }
@@ -98,6 +119,7 @@ import LocalMusicCore
     func finish() async { await task?.value }
 
     private func run() async {
+        await loading?.value   // jobs take the saved sources
         notice = nil
         let keys = (try? await store.neteaseKeys()) ?? [:]
         var refreshed = ContinuousClock.now, failures = 0
@@ -107,9 +129,9 @@ import LocalMusicCore
                 switch await service.enrich(job) {
                 case .failed(let message) where !Task.isCancelled:
                     failures += 1
-                    notice = "网易云请求失败：\(message)"
+                    notice = "在线资料来源请求失败：\(message)"
                     if failures >= Self.maxFailures {
-                        notice = "网易云连续 \(failures) 次请求失败，已停止：\(message)"
+                        notice = "连续 \(failures) 首歌请求失败，已停止：\(message)"
                         queue.removeAll()
                     }
                 default:
@@ -132,8 +154,10 @@ import LocalMusicCore
     /// song up again keeps them).
     private func job(_ row: TrackRow, songID: Int64?) -> EnrichJob? {
         row.fingerprint.map {
-            EnrichJob(fingerprint: $0, query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),
-                      songID: songID, needsLyrics: !row.hasFileLyrics, needsCover: !row.hasCover && !ArtworkCache.hasFolderImage(near: row))
+            EnrichJob(fingerprint: $0, trackID: row.id,
+                      query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),
+                      songID: songID, needsLyrics: !row.hasFileLyrics, needsCover: !row.hasCover && !ArtworkCache.hasFolderImage(near: row),
+                      sources: settings.enabled, storefront: settings.storefront)
         }
     }
 }
@@ -154,7 +178,7 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The missing-* views list what's left to do: a matched song's remaining gaps are ones NetEase can't fill (shown in
+    /// The missing-* views list what's left to do: a matched song's remaining gaps are ones no source filled (shown in
     /// 已补全). Folder art isn't checked here (a file lookup per song); enrichment still skips covers a folder image provides.
     func includes(_ row: TrackRow, _ match: MatchState?) -> Bool {
         let applied = match?.status == .auto || match?.status == .confirmed
@@ -167,7 +191,7 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Album artist isn't counted: NetEase can't supply it.
+    /// Album artist isn't counted: no source supplies it.
     static func missingInfo(_ row: TrackRow) -> Bool { row.album == nil || row.trackNo == nil || row.year == nil }
 
     /// `checkingFolderArt`: a file lookup, so only on demand (a folder image counts as a cover).

@@ -218,6 +218,16 @@ final class SelfTestRunner {
                 }
             }
             try await settle()
+        case "setSources":
+            // `order` / `disabled` (source names), `storefront`; what's not given stays.
+            guard let enrich = model.enrich else { throw SelfTestFailure(description: "no enrichment") }
+            var settings = enrich.settings
+            func sources(_ key: String) -> [OnlineSource]? { (step[key] as? [String])?.compactMap(OnlineSource.init) }
+            if let order = sources("order") { settings.order = order }
+            if let disabled = sources("disabled") { settings.disabled = Set(disabled) }
+            if let storefront = step.string("storefront") { settings.storefront = storefront }
+            await enrich.setSettings(settings).value
+            try await settle()
         case "enrichFilter":
             guard let filter = EnrichFilter(rawValue: try step.required("value")) else { throw SelfTestFailure(description: "unknown filter") }
             model.ui.enrichFilter = filter
@@ -227,7 +237,7 @@ final class SelfTestRunner {
             let title = try step.required("title")
             guard let row = try library().index.songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
             inspected[title] = ["album": row.album as Any? ?? NSNull(), "artists": row.artists, "composers": row.composers,
-                                "trackNo": row.trackNo as Any? ?? NSNull(), "year": row.year as Any? ?? NSNull(),
+                                "trackNo": row.trackNo as Any? ?? NSNull(), "year": row.year as Any? ?? NSNull(), "genre": row.genre as Any? ?? NSNull(),
                                 "hasLyrics": row.hasLyrics, "hasArtwork": row.hasArtwork, "coverFile": row.coverFile != nil,
                                 "match": model.enrich?.match(row)?.status.rawValue ?? NSNull()] as Step
         case "like":
@@ -326,6 +336,7 @@ final class SelfTestRunner {
         case "enableNowPlaying":
             model.enableNowPlaying()
         case "openSettings":
+            model.ui.settingsTab = Int(step.number("tab") ?? 0)
             model.ui.openSettings?()
             let deadline = Date().addingTimeInterval(5)
             while (try? window("settings")) == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
@@ -418,7 +429,9 @@ final class SelfTestRunner {
         let counts = EnrichFilter.counts(songs, enrich.match)
         return ["running": enrich.progress != nil, "notice": enrich.notice ?? NSNull(),
                 "counts": Dictionary(uniqueKeysWithValues: EnrichFilter.allCases.map { ($0.rawValue, counts[$0] ?? 0) }),
-                "auto": titles(.auto), "confirmed": titles(.confirmed), "pending": titles(.pending), "none": titles(.none), "rejected": titles(.rejected)]
+                "auto": titles(.auto), "confirmed": titles(.confirmed), "pending": titles(.pending), "none": titles(.none), "rejected": titles(.rejected),
+                "requests": Dictionary(OnlineFixtures.requests.map { (String($0.prefix { $0 != "/" }).replacing(".", with: "_"), 1) }, uniquingKeysWith: +),
+                "sources": enrich.settings.enabled.map(\.rawValue)]
     }
 
     /// The person the artists / composers page shows.

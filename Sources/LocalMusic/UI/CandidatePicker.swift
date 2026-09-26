@@ -1,7 +1,7 @@
 import SwiftUI
 import LocalMusicCore
 
-/// 选择匹配: the NetEase songs a lookup couldn't decide between. Covers load from NetEase (through the enrichment client,
+/// 选择匹配: the online songs a lookup couldn't decide between. Covers load online (through the enrichment client,
 /// so self-tests get recorded ones) only while this is open.
 struct CandidatePicker: View {
     let model: AppModel
@@ -26,7 +26,7 @@ struct CandidatePicker: View {
                         .task { await enrich.loadThumbnail(song) }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(song.title).lineLimit(1)
-                        Text(([song.artists.joined(separator: " / "), song.album] + [song.year.map(String.init)].compactMap { $0 })
+                        Text(([song.source.title, song.artists.joined(separator: " / "), song.album] + [song.year.map(String.init)].compactMap { $0 })
                                 .filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                     }

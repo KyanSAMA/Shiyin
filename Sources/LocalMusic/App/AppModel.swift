@@ -122,8 +122,10 @@ enum Route: Hashable {
     var deletingPlaylist: Int64?
     var infoEditor: InfoEditor?
     var enrichFilter = EnrichFilter.missingLyrics
+    /// 0 曲库, 1 在线资料.
+    var settingsTab = 0
     var enrichSelection: Set<Int64> = []
-    /// The song whose NetEase candidates are being chosen from, with the candidates as they were when the sheet opened.
+    /// The song whose online candidates are being chosen from, with the candidates as they were when the sheet opened.
     var candidatesFor: (row: TrackRow, candidates: [OnlineSong])?
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?

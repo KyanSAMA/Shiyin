@@ -4,7 +4,7 @@ import Testing
 @testable import LocalMusicCore
 
 /// Temp library of synthetic FLAC headers (the scanner never decodes audio, so no real frames are needed).
-private final class TempLibrary {
+final class TempLibrary {
     let root = FileManager.default.temporaryDirectory.appending(path: "lm-lib-\(UUID().uuidString)")
     let store: LibraryStore
 

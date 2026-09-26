@@ -1,7 +1,7 @@
 import SwiftUI
 import LocalMusicCore
 
-/// 信息补全: songs missing a cover, lyrics or basic info, filled from NetEase on request. Only gaps are filled; the
+/// 信息补全: songs missing a cover, lyrics or basic info, filled from the online sources on request. Only gaps are filled; the
 /// files are never touched.
 struct EnrichView: View {
     let model: AppModel
@@ -17,7 +17,7 @@ struct EnrichView: View {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("信息补全").font(.system(size: 26, weight: .bold))
-                        Text("从网易云补全缺失的封面、歌词、曲序和年份。只填空缺，不改动文件里已有的信息，也不修改音频文件。")
+                        Text("从在线来源（在设置里选择）补全缺失的封面、歌词、曲序、年份和流派。只填空缺，不改动文件里已有的信息，也不修改音频文件。")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }

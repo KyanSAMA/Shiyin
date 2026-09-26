@@ -55,21 +55,20 @@ public enum OnlineError: Error, Equatable {
 public struct OnlineClient: Sendable {
     static let browserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     private let session: URLSession
-    /// iTunes Store country.
-    let storefront: String
 
     /// Tests and self-tests pass a configuration whose `protocolClasses` serve recorded responses.
-    public init(configuration: URLSessionConfiguration = .ephemeral, storefront: String = OnlineSettings.default.storefront) {
+    public init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.timeoutIntervalForRequest = 15
         session = URLSession(configuration: configuration)
-        self.storefront = storefront
     }
 
-    public func search(_ source: OnlineSource, _ keywords: String, limit: Int = 10) async throws -> [OnlineSong] {
+    /// `storefront`: the iTunes Store country searched.
+    public func search(_ source: OnlineSource, _ keywords: String, limit: Int = 10,
+                       storefront: String = OnlineSettings.default.storefront) async throws -> [OnlineSong] {
         switch source {
         case .netease: try await neteaseSearch(keywords, limit: limit)
         case .qq: try await qqSearch(keywords, limit: limit)
-        case .itunes: try await itunesSearch(keywords, limit: limit)
+        case .itunes: try await itunesSearch(keywords, limit: limit, storefront: storefront)
         case .lrclib: try await lrclibSearch(keywords, limit: limit)
         }
     }

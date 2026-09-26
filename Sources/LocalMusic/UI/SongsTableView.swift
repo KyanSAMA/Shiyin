@@ -278,7 +278,7 @@ struct SongsTableView: NSViewRepresentable {
             let allLiked = picked.allSatisfy { model.library?.liked[$0.id] != nil }
             add(allLiked ? "取消喜欢" : "喜欢", #selector(toggleLiked), tag: allLiked ? 0 : 1)   // tag: what it sets
             add("编辑信息…", #selector(editInfo))
-            add("从网易云补全信息", #selector(enrich))
+            add("在线补全信息", #selector(enrich))
             menu.addItem(.separator())
             add("在访达中显示", #selector(reveal))
         }

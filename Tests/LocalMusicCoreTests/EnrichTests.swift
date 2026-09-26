@@ -98,11 +98,26 @@ struct OnlineTests {
          {"id":8,"trackName":"Instrumental","artistName":"X","albumName":"Y","duration":60,"instrumental":true,"plainLyrics":null,"syncedLyrics":null}]
         """#
 
+    static let toneQQ = #"""
+        {"code":0,"req":{"code":0,"data":{"body":{"song":{"list":[{"mid":"t1","name":"Tone","singer":[{"name":"Tester"}],
+         "album":{"name":"Tones","mid":"a1"},"time_public":"2020-05-01","index_album":3,"index_cd":0,"interval":10}]}}}}}
+        """#
+    static let toneITunes = #"""
+        {"resultCount":1,"results":[{"trackId":5,"trackName":"Tone","artistName":"Tester","collectionName":"Tones","trackTimeMillis":10000,
+         "trackNumber":3,"releaseDate":"2021-01-01T12:00:00Z","primaryGenreName":"Pop","artworkUrl100":"https://is1.mzstatic.com/x/100x100bb.jpg"}]}
+        """#
+    static let toneLRCLib = #"""
+        [{"id":1,"trackName":"Tone","artistName":"Tester","albumName":"Tones","duration":10,"syncedLyrics":"[00:01.00]beep"}]
+        """#
+
     private func client() throws -> OnlineClient {
         let directory = FileManager.default.temporaryDirectory.appending(path: "lm-online-\(UUID().uuidString)")
         for (file, body) in [("netease/search/群青 YOASOBI.json", Self.search), ("netease/song/418602075.json", Self.detail),
                              ("netease/lyric/418602075.json", Self.lyric), ("qq/search/浸春芜.json", Self.qqSearch),
-                             ("qq/lyric/001V1NtH360djY.json", Self.qqLyric), ("itunes/浸春芜.json", Self.itunes), ("lrclib/群青.json", Self.lrclib)] {
+                             ("qq/lyric/001V1NtH360djY.json", Self.qqLyric), ("itunes/浸春芜.json", Self.itunes), ("lrclib/群青.json", Self.lrclib),
+                             ("qq/search/Tone Tester.json", Self.toneQQ), ("itunes/Tone Tester.json", Self.toneITunes),
+                             ("lrclib/Tone Tester.json", Self.toneLRCLib), ("netease/search/Broken Tester.json", "<html>captcha</html>"),
+                             ("cover.jpg", "jpeg")] {
             let url = directory.appending(path: file)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(body.utf8).write(to: url)
@@ -153,6 +168,37 @@ struct OnlineTests {
         let lrclib = try await client.search(.lrclib, "群青")
         #expect(lrclib.map(\.lyrics) == ["[00:01.49]嗚呼", nil] && lrclib[0].album == "THE BOOK")
         #expect(try await client.lyrics(lrclib[0]) == "[00:01.49]嗚呼")
+    }
+
+    @Test func asksSourcesWhileTheyCanFillGapsAndAPickReplacesEveryLayer() async throws {
+        let lib = try TempLibrary()
+        try lib.flac("Tone.flac", ["TITLE=Tone", "ARTIST=Tester"])
+        try lib.flac("Broken.flac", ["TITLE=Broken", "ARTIST=Tester"])
+        _ = try await lib.scan()
+        let service = EnrichService(store: lib.store, client: try client(), interval: .zero)
+        func job(_ title: String) async throws -> EnrichJob {
+            let row = try #require(try await lib.store.rows().first { $0.title == title })
+            return EnrichJob(fingerprint: row.fingerprint!, trackID: row.id,
+                             query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),
+                             songID: nil, needsLyrics: true, needsCover: true, sources: OnlineSource.allCases, storefront: "jp")
+        }
+        let tone = try await job("Tone")
+        guard case .applied(let songs) = await service.enrich(tone) else { Issue.record("not applied"); return }
+        #expect(songs.map(\.source) == [.qq, .itunes, .lrclib])   // NetEase found nothing; QQ left genre and lyrics
+        var row = try #require(try await lib.store.rows([tone.trackID]).first)
+        #expect(row.year == 2020 && row.album == "Tones" && row.genre == "Pop" && row.hasLyrics && row.coverFile != nil)
+        let qqCover = try #require(try await lib.store.enrichment(tone.fingerprint, source: .online(.qq))[.cover])
+
+        try await service.apply(songs[1], to: tone, status: .confirmed)
+        #expect(try await lib.store.enrichment(tone.fingerprint, source: .online(.qq)).isEmpty)
+        #expect(try await lib.store.enrichment(tone.fingerprint, source: .online(.lrclib)).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: lib.store.coversDirectory.appending(path: qqCover).path))
+        row = try #require(try await lib.store.rows([tone.trackID]).first)
+        #expect(row.year == 2021 && row.genre == "Pop" && !row.hasLyrics && row.coverFile != nil)
+        #expect(try await lib.store.matches(tone.fingerprint)[tone.fingerprint]?.status == .confirmed)
+
+        // One source failing while the others find nothing is "not found", not a failure.
+        #expect(await service.enrich(try await job("Broken")) == .notFound)
     }
 
     @Test func decodesThe163Key() throws {
