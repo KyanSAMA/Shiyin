@@ -5,12 +5,13 @@
 #              and a gapless pair (one 375 Hz tone split mid-buffer, 12 s = whole periods)
 #   library/Music/  a file the self-tests exclude;  library/junk/  non-audio files the scanner must ignore
 #   extra/     files copied in at runtime to exercise FSEvents
+#   netease/   audio the self-tests wrap into .ncm files (tags junk, as inside real ones), and a plain FLAC to import
 #   loudness/  levels exact to ffmpeg's ebur128: Level Album (Loud −8 LUFS sine, Quiet −30 LUFS pink noise), Mid −20 LUFS,
 #              Mono −20 LUFS (dual mono), Peaky.wav (−30 LUFS noise with single-sample spikes to full scale),
 #              Step (the Gapless tone with part 2 6 dB down: track gains must switch exactly on the join)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION=7
+VERSION=8
 OUT=.build/fixtures
 [ "$(cat "$OUT/.version" 2>/dev/null)" = "$VERSION" ] && exit 0
 rm -rf "$OUT"
@@ -86,6 +87,9 @@ ff -i "$OUT/cover-a.png" "$LIB/junk/cover.jpg"
 printf 'not audio' > "$LIB/junk/music_tag.db"
 
 FREQ=660 audio "$OUT/extra/新歌.flac" 2 44100 "$FLAC16" - -metadata title=新歌 -metadata artist=YOASOBI
+FREQ=700 audio "$OUT/netease/raw.flac" 2 44100 "$FLAC16" - -metadata title=junk -metadata comment=junk
+FREQ=740 audio "$OUT/netease/raw.mp3" 2 44100 "-c:a libmp3lame -b:a 128k -id3v2_version 3" - -metadata title=junk
+FREQ=780 audio "$OUT/netease/夜曲.flac" 2 44100 "$FLAC16" - -metadata title=夜曲 -metadata artist=周杰伦
 
 # level <out> <LUFS> <mono|stereo> <lavfi source> [ffmpeg output args...]: measure once, then scale to the target
 level() {

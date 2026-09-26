@@ -153,6 +153,54 @@ final class SelfTestRunner {
             try await library().scan()
         case "fs":
             try fileOperation(step)
+        case "setImport":
+            // `folder` (NetEase), `target` (a path, or "first"), `naming`, `fill`, `trash`; what's not given stays.
+            let importer = try importModel()
+            await importer.ready()
+            var settings = importer.settings
+            if let folder = step.string("folder") { settings.neteaseFolder = resolve(folder) }
+            if let target = step.string("target") { settings.target = target == "first" ? nil : resolve(target) }
+            if let naming = step.string("naming").flatMap(ImportNaming.init) { settings.naming = naming }
+            if let fill = step["fill"] as? Bool { settings.fill = fill }
+            if let trash = step["trash"] as? Bool { settings.trashOriginals = trash }
+            await importer.setSettings(settings).value
+            await importer.refresh()
+            try await settle()
+        case "makeNCM":
+            // An .ncm at `to` (inside --out) around the audio file `from`, with `musicId` / `title` / `artists` / `album`,
+            // an optional `cover` image file and sidecar `lrc` text.
+            let from = URL(filePath: resolve(try step.required("from"))), to = URL(filePath: resolve(try step.required("to"))).standardizedFileURL
+            guard canonicalPath(to.path).hasPrefix(canonicalPath(out.path) + "/") else {
+                throw SelfTestFailure(description: "makeNCM path \(to.path) is outside --out")
+            }
+            var meta: Step = ["musicName": try step.required("title"), "album": step.string("album") ?? "", "format": from.pathExtension.lowercased(),
+                              "artist": (step["artists"] as? [String] ?? []).map { [$0, 0] as [Any] }]
+            if let id = step.number("musicId") { meta["musicId"] = Int64(id) }
+            let json = String(decoding: try JSONSerialization.data(withJSONObject: meta), as: UTF8.self)
+            let cover = try step.string("cover").map { try Data(contentsOf: URL(filePath: resolve($0))) }
+            try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try NCMFile.encode(audio: Data(contentsOf: from), meta: "music:" + json, cover: cover).write(to: to)
+            if let lrc = step.string("lrc") { try lrc.write(to: to.deletingPathExtension().appendingPathExtension("lrc"), atomically: true, encoding: .utf8) }
+        case "importNetease":
+            // Plans 迁移 for `titles` (else everything not in the library), with `target` / `naming` / `fill` / `trash` over
+            // the defaults; unless `keepOpen`, starts it and waits for the queue.
+            let importer = try importModel()
+            await importer.ready()
+            let titles = step["titles"] as? [String]
+            let sources = importer.sources.filter { titles?.contains($0.title) ?? importer.isFresh($0) }
+            let plan = importer.plan(sources)
+            if let target = step.string("target") { plan.target = target == "first" ? nil : URL(filePath: resolve(target)) }
+            if let naming = step.string("naming").flatMap(ImportNaming.init) { plan.naming = naming }
+            if let fill = step["fill"] as? Bool { plan.fill = fill }
+            if let trash = step["trash"] as? Bool { plan.trashOriginals = trash }
+            model.ui.sheet = .importPlan(plan)
+            try await settle()
+            if step["keepOpen"] as? Bool != true {
+                model.ui.sheet = nil
+                importer.start(plan)
+                await importer.finish()
+                try await settle()
+            }
         case "promptPlaylist":
             if let name = step.string("rename") { model.promptRenamePlaylist(try playlist(name)) } else { model.promptNewPlaylist(try trackIDs(step)) }
             try await settle()
@@ -575,6 +623,7 @@ final class SelfTestRunner {
             case .liked: return ui.likedSongs(in: index, liked: model.library?.liked ?? [:]).map(\.title)
             case .enrich:
                 return ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, model.enrich?.match($0), backedUp: model.library?.backedUp ?? []) }.map(\.title)
+            case .neteaseImport: return model.importer?.sources.map(\.title) ?? []
             case .playlist(let id):
                 return ui.narrowed(model.library?.playlist(id)?.trackIDs.compactMap { index.tracks[$0] } ?? [], in: index).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)
@@ -599,6 +648,37 @@ final class SelfTestRunner {
         let queue = step.string("context") == "songs" ? index.songs.map(\.id)
             : index.albums.first { $0.trackIDs.contains(song.id) }?.trackIDs ?? [song.id]
         try player().play(queue, startAt: queue.firstIndex(of: song.id) ?? 0)
+    }
+
+    private func importModel() throws -> ImportModel {
+        guard let importer = model.importer else { throw SelfTestFailure(description: "no importer") }
+        return importer
+    }
+
+    private func importState(_ importer: ImportModel) -> Step {
+        func describe(_ source: ImportSource, _ state: ImportState?) -> String {
+            switch state {
+            case .queued?: "queued"
+            case .working?: "working"
+            case .done(let url, let note)?: "done: " + url.path.replacingOccurrences(of: out.path + "/", with: "") + (note.map { " (\($0))" } ?? "")
+            case .failed(let reason)?: "failed: " + reason
+            case nil: importer.inLibrary(source) ? "inLibrary" : ""
+            }
+        }
+        var plan: Any = NSNull()
+        if case .importPlan(let open)? = model.ui.sheet {
+            plan = ["count": open.sources.count, "target": open.target?.path ?? "first", "naming": open.naming.rawValue,
+                    "fill": open.fill, "trash": open.trashOriginals] as Step
+        }
+        var sources: Step = [:]
+        for source in importer.sources {
+            sources[source.title] = ["file": source.url.lastPathComponent, "format": source.format, "ncm": source.isNCM, "state": describe(source, importer.states[source.id])] as Step
+        }
+        let bin = (model.options.dataDir ?? out).deletingLastPathComponent().appending(path: "Trash")
+        let trashed = (try? FileManager.default.contentsOfDirectory(atPath: bin.path).sorted()) ?? []
+        return ["folder": importer.settings.neteaseFolder, "running": importer.running, "plan": plan, "sources": sources,
+                "count": importer.sources.count, "trashed": trashed,
+                "processed": Dictionary(importer.processed.map { ($0.source.title, describe($0.source, $0.state)) }, uniquingKeysWith: { _, b in b })]
     }
 
     private func library() throws -> LibraryModel {
@@ -766,6 +846,7 @@ final class SelfTestRunner {
             "picker": model.ui.sheet?.picker.map(pickerState) ?? NSNull(),
             "editor": model.ui.sheet?.editor.map(editorState) ?? NSNull(),
             "fileTags": fileTags,
+            "import": model.importer.map(importState) ?? NSNull(),
             "tagPlan": model.ui.sheet?.plan.map { plan in
                 ["items": Dictionary(plan.items.map { ($0.row.title, ["changes": plan.changes($0).map(\.field.rawValue), "skip": $0.skip ?? NSNull()] as Step) },
                                      uniquingKeysWith: { first, _ in first }),

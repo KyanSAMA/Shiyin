@@ -17,6 +17,11 @@ struct SettingsView: View {
                             Form { OnlineSourcesSection(enrich: enrich) }.formStyle(.grouped)
                         }
                     }
+                    if let importer = model.importer {
+                        Tab("导入", systemImage: "square.and.arrow.down", value: 2) {
+                            Form { ImportSettingsSection(importer: importer) }.formStyle(.grouped)
+                        }
+                    }
                 }
             } else {
                 ContentUnavailableView("无法打开曲库", systemImage: "exclamationmark.triangle", description: Text(model.startupError ?? ""))
@@ -138,6 +143,52 @@ private struct OnlineSourcesSection: View {
         var settings = enrich.settings
         change(&settings)
         enrich.setSettings(settings)
+    }
+}
+
+/// Where 网易云导入 reads from, and its defaults (each migration's sheet can change them, and remembers them).
+private struct ImportSettingsSection: View {
+    let importer: ImportModel
+
+    var body: some View {
+        let settings = importer.settings
+        Section {
+            LabeledContent("网易云下载文件夹") { folder(settings.neteaseFolder) { $0.neteaseFolder = $1 } }
+            LabeledContent("导入到") {
+                HStack {
+                    Text(settings.target.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "第一个音乐文件夹")
+                        .lineLimit(1).truncationMode(.middle)
+                    Menu("更改") {
+                        Button("第一个音乐文件夹") { update { $0.target = nil } }
+                        Button("其他文件夹…") { if let url = chooseFolder(prompt: "导入到这里") { update { $0.target = url.path } } }
+                    }
+                    .fixedSize()
+                }
+            }
+            Picker("文件命名", selection: Binding(get: { settings.naming }, set: { value in update { $0.naming = value } })) {
+                ForEach(ImportNaming.allCases, id: \.self) { Text($0.example).tag($0) }
+            }
+            Toggle("从网易云补全信息并写入文件", isOn: Binding(get: { settings.fill }, set: { value in update { $0.fill = value } }))
+            Toggle("迁移后把原文件移到废纸篓", isOn: Binding(get: { settings.trashOriginals }, set: { value in update { $0.trashOriginals = value } }))
+        } header: {
+            Text("网易云导入")
+        } footer: {
+            Text(".ncm 解密成原始的 FLAC / MP3，FLAC / MP3 直接复制；只在导入目录里新建文件，不覆盖已有文件。原文件移到废纸篓，可以找回。")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func folder(_ path: String, _ set: @escaping (inout ImportSettings, String) -> Void) -> some View {
+        HStack {
+            Text((path as NSString).abbreviatingWithTildeInPath).lineLimit(1).truncationMode(.middle)
+            Button("选择…") { if let url = chooseFolder(prompt: "选择") { update { set(&$0, url.path) } } }
+        }
+    }
+
+    private func update(_ change: (inout ImportSettings) -> Void) {
+        var settings = importer.settings
+        change(&settings)
+        importer.setSettings(settings)
     }
 }
 

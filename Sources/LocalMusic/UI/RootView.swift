@@ -63,6 +63,7 @@ struct RootView: View {
             case .editor(let editor): InfoEditorView(model: model, editor: editor)
             case .picker(let picker): if let enrich = model.enrich { MatchPickerView(model: model, enrich: enrich, picker: picker) }
             case .write(let plan): TagWriteView(model: model, plan: plan)
+            case .importPlan(let plan): if let importer = model.importer { ImportPlanView(model: model, importer: importer, plan: plan) }
             }
         }
         .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",
@@ -139,7 +140,9 @@ struct DetailView: View {
 
     var body: some View {
         let ui = model.ui
-        if let library = model.library, !library.index.songs.isEmpty {
+        if ui.sidebar == .neteaseImport, let importer = model.importer {
+            NeteaseImportView(model: model, importer: importer)
+        } else if let library = model.library, !library.index.songs.isEmpty {
             let index = library.index
             VStack(spacing: 0) {
                 if !ui.filter.isEmpty {
@@ -165,6 +168,7 @@ struct DetailView: View {
                 case .artists, .composers:
                     let role: PersonRole = ui.sidebar == .artists ? .artist : .composer, groups = ui.people(role, in: index)
                     Results(ui: ui, isEmpty: groups.isEmpty) { PeopleBrowser(groups: groups, role: role, index: index) }
+                case .neteaseImport: EmptyView()
                 case .enrich:
                     if let enrich = model.enrich { EnrichView(model: model, enrich: enrich, index: index) }
                 case .playlist(let id):

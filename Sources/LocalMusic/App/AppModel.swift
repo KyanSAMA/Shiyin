@@ -30,12 +30,12 @@ struct LaunchOptions {
 }
 
 enum SidebarItem: Hashable, Identifiable {
-    case songs, albums, artists, composers, recent, liked, enrich
+    case songs, albums, artists, composers, recent, liked, enrich, neteaseImport
     case playlist(Int64)
 
     static let library: [Self] = [.songs, .albums, .artists, .composers]
     static let presets: [Self] = [.recent, .liked]
-    static let tools: [Self] = [.enrich]
+    static let tools: [Self] = [.enrich, .neteaseImport]
 
     var id: Self { self }
 
@@ -54,6 +54,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .recent: "recent"
         case .liked: "liked"
         case .enrich: "enrich"
+        case .neteaseImport: "netease"
         case .playlist: "playlist"
         }
     }
@@ -67,6 +68,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .recent: "最近添加"
         case .liked: "喜欢的歌曲"
         case .enrich: "信息补全"
+        case .neteaseImport: "网易云导入"
         case .playlist: "播放列表"
         }
     }
@@ -80,6 +82,7 @@ enum SidebarItem: Hashable, Identifiable {
         case .recent: "clock"
         case .liked: "heart"
         case .enrich: "wand.and.sparkles"
+        case .neteaseImport: "square.and.arrow.down"
         case .playlist: "music.note.list"
         }
     }
@@ -103,15 +106,16 @@ enum Route: Hashable {
     case album(String)
 }
 
-/// 编辑信息, 选择匹配 or 写入文件; one slot, so one can hand over to another.
+/// 编辑信息, 选择匹配, 写入文件 or 迁移; one slot, so one can hand over to another.
 enum SongSheet: Identifiable {
-    case editor(InfoEditor), picker(MatchPicker), write(TagWritePlan)
+    case editor(InfoEditor), picker(MatchPicker), write(TagWritePlan), importPlan(ImportPlan)
 
     var id: ObjectIdentifier {
         switch self {
         case .editor(let editor): ObjectIdentifier(editor)
         case .picker(let picker): ObjectIdentifier(picker)
         case .write(let plan): ObjectIdentifier(plan)
+        case .importPlan(let plan): ObjectIdentifier(plan)
         }
     }
 
@@ -140,7 +144,7 @@ enum SongSheet: Identifiable {
     var deletingPlaylist: Int64?
     var sheet: SongSheet?
     var enrichFilter = EnrichFilter.missingLyrics
-    /// 0 曲库, 1 在线资料.
+    /// 0 曲库, 1 在线资料, 2 导入.
     var settingsTab = 0
     var enrichSelection: Set<Int64> = []
     /// What songs are being dragged over in the sidebar.
@@ -238,6 +242,7 @@ enum SongSheet: Identifiable {
     let player: PlayerModel?
     let loudness: LoudnessModel?
     let enrich: EnrichModel?
+    let importer: ImportModel?
     let artwork: ArtworkStore
     @ObservationIgnored private var nowPlaying: NowPlayingBridge?
     private(set) var startupError: String?
@@ -271,6 +276,15 @@ enum SongSheet: Identifiable {
         self.player = player
         self.loudness = loudness
         self.enrich = enrich
+        let importer = library.map { ImportModel(library: $0, enrich: enrich, options: options) }
+        self.importer = importer
+        if let library, let importer {
+            let reloaded = library.onReload
+            library.onReload = { [weak importer] in
+                reloaded?()
+                Task { await importer?.libraryChanged() }
+            }
+        }
         if let player { Task { await player.restore() } }
         if !options.isSelfTest { enableNowPlaying() }
         // AppKit retains the monitor and calls it on the main thread.

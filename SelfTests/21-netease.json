@@ -1,0 +1,288 @@
+{
+  "timeout": 90,
+  "window": {
+    "width": 1440,
+    "height": 900
+  },
+  "steps": [
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/library/mp3/v24.mp3",
+      "to": "@out/lib/群青.mp3"
+    },
+    {
+      "do": "startLibrary",
+      "include": [
+        "@out/lib"
+      ]
+    },
+    {
+      "do": "makeNCM",
+      "from": "@fixtures/netease/raw.flac",
+      "to": "@out/网易云音乐/晴天.ncm",
+      "musicId": 4001,
+      "title": "晴天",
+      "artists": [
+        "周杰伦"
+      ],
+      "album": "叶惠美",
+      "cover": "@fixtures/cover-a.png",
+      "lrc": "{\"t\":0,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"周杰伦\"}]}\n[00:01.00]侧边歌词"
+    },
+    {
+      "do": "makeNCM",
+      "from": "@fixtures/netease/raw.mp3",
+      "to": "@out/网易云音乐/群青.ncm",
+      "musicId": 4002,
+      "title": "群青",
+      "artists": [
+        "YOASOBI"
+      ],
+      "album": "THE BOOK",
+      "lrc": "{\"t\":0,\"c\":[{\"tx\":\"作曲: \"},{\"tx\":\"Ayase\"}]}\n[00:00.50]群青侧边歌词"
+    },
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/netease/夜曲.flac",
+      "to": "@out/网易云音乐/夜曲.flac"
+    },
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/netease/raw.flac",
+      "to": "@out/网易云音乐/meta/skipped.flac"
+    },
+    {
+      "do": "setImport",
+      "folder": "@out/网易云音乐",
+      "target": "first",
+      "naming": "title",
+      "fill": true,
+      "trash": true
+    },
+    {
+      "do": "sidebar",
+      "value": "netease"
+    },
+    {
+      "do": "assert",
+      "path": "import.count",
+      "equals": 3
+    },
+    {
+      "do": "assert",
+      "path": "import.sources.晴天.format",
+      "equals": "flac"
+    },
+    {
+      "do": "assert",
+      "path": "import.sources.群青.format",
+      "equals": "mp3"
+    },
+    {
+      "do": "assert",
+      "path": "import.sources.夜曲.ncm",
+      "equals": false
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "netease-light"
+    },
+    {
+      "do": "importNetease",
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "import.plan.count",
+      "equals": 3
+    },
+    {
+      "do": "snapshot",
+      "name": "netease-sheet",
+      "window": "sheet"
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "importNetease"
+    },
+    {
+      "do": "assert",
+      "path": "import.processed.晴天",
+      "equals": "done: lib/晴天.flac"
+    },
+    {
+      "do": "assert",
+      "path": "import.processed.群青",
+      "equals": "done: lib/群青 (THE BOOK).mp3"
+    },
+    {
+      "do": "assert",
+      "path": "import.processed.夜曲",
+      "equals": "done: lib/夜曲.flac"
+    },
+    {
+      "do": "assert",
+      "path": "import.count",
+      "equals": 0
+    },
+    {
+      "do": "assert",
+      "path": "import.trashed",
+      "equals": [
+        "夜曲.flac",
+        "晴天.lrc",
+        "晴天.ncm",
+        "群青.lrc",
+        "群青.ncm"
+      ]
+    },
+    {
+      "do": "readFile",
+      "path": "@out/lib/晴天.flac",
+      "as": "qingtian"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.TITLE",
+      "equals": "晴天"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.ALBUM",
+      "equals": "叶惠美"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.TRACKNUMBER",
+      "equals": "3"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.COMPOSER",
+      "equals": "周杰伦"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.LYRICS",
+      "contains": "故事的小黄花"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.DESCRIPTION",
+      "contains": "163 key"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.qingtian.hasCover",
+      "equals": true
+    },
+    {
+      "do": "readFile",
+      "path": "@out/lib/群青 (THE BOOK).mp3",
+      "as": "gunjou"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.gunjou.ALBUM",
+      "equals": "THE BOOK"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.gunjou.LYRICS",
+      "contains": "群青侧边歌词"
+    },
+    {
+      "do": "readFile",
+      "path": "@out/lib/夜曲.flac",
+      "as": "yequ"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.yequ.ALBUM",
+      "equals": "十一月的萧邦"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.yequ.LYRICS",
+      "contains": "一群嗜血的蚂蚁"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.yequ.hasCover",
+      "equals": true
+    },
+    {
+      "do": "makeNCM",
+      "from": "@fixtures/netease/raw.flac",
+      "to": "@out/网易云音乐/晴天 副本.ncm",
+      "musicId": 4001,
+      "title": "晴天",
+      "artists": [
+        "周杰伦"
+      ],
+      "album": "叶惠美"
+    },
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/netease/夜曲.flac",
+      "to": "@out/网易云音乐/夜曲 副本.flac"
+    },
+    {
+      "do": "setImport"
+    },
+    {
+      "do": "assert",
+      "path": "import.sources.晴天.state",
+      "equals": "inLibrary"
+    },
+    {
+      "do": "assert",
+      "path": "import.sources.夜曲.state",
+      "equals": "inLibrary"
+    },
+    {
+      "do": "assert",
+      "path": "import.plan",
+      "equals": null
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "netease-after"
+    },
+    {
+      "do": "appearance",
+      "value": "dark"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "netease-dark"
+    },
+    {
+      "do": "openSettings",
+      "tab": 2
+    },
+    {
+      "do": "snapshot",
+      "name": "settings-import",
+      "window": "settings"
+    }
+  ]
+}
