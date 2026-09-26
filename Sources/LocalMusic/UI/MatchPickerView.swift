@@ -122,7 +122,7 @@ struct MatchPickerView: View {
     }
 }
 
-/// Each source's progress, read in its own body (no `ForEach`), so a source that answers late always shows.
+/// Each source's progress; failures explain themselves on hover.
 private struct SourceStatusLine: View {
     let picker: MatchPicker
 
@@ -190,7 +190,7 @@ private struct MatchDetail: View {
                         DurationDelta(song: song, duration: picker.row.duration)
                     }
                 }
-                // Read here, not inside ForEach, so a year loaded later shows. A value only from the file name is replaced.
+                // A value only from the file name is replaced.
                 let rows = Self.fields.compactMap { field in
                     picker.value(field, of: song).map { (field: field, value: $0, current: base.shown(field), inferred: base.inferred.contains(field)) }
                 }

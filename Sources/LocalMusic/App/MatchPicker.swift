@@ -106,7 +106,12 @@ extension EnrichModel {
         await withTaskGroup(of: (OnlineSource, [OnlineSong]?, String?).self) { group in
             for source in picker.sources {
                 group.addTask { [service, keywords = picker.keywords, storefront = settings.storefront] in
-                    do { return (source, try await service.search(source, keywords, storefront: storefront), nil) } catch {
+                    // Not `return (source, try await …)`: optimized builds lost `source` across the suspension (it came back
+                    // as .netease), so its results went to the wrong source and the others stayed 搜索中.
+                    do {
+                        let songs = try await service.search(source, keywords, storefront: storefront)
+                        return (source, songs, nil)
+                    } catch {
                         return (source, nil, String(describing: error))
                     }
                 }
