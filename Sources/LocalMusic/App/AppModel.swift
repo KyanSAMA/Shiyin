@@ -9,8 +9,8 @@ struct LaunchOptions {
     let outDir: URL?
     let dataDir: URL?
     let fixturesDir: URL?
-    /// Recorded NetEase responses instead of the network (self-tests).
-    let neteaseFixturesDir: URL?
+    /// Recorded online responses instead of the network (self-tests).
+    let onlineFixturesDir: URL?
 
     static let current = LaunchOptions(arguments: CommandLine.arguments)
 
@@ -23,7 +23,7 @@ struct LaunchOptions {
         outDir = url(after: "--out")
         dataDir = url(after: "--data-dir")
         fixturesDir = url(after: "--fixtures")
-        neteaseFixturesDir = url(after: "--netease-fixtures")
+        onlineFixturesDir = url(after: "--online-fixtures")
     }
 
     var isSelfTest: Bool { selfTestScript != nil }
@@ -124,7 +124,7 @@ enum Route: Hashable {
     var enrichFilter = EnrichFilter.missingLyrics
     var enrichSelection: Set<Int64> = []
     /// The song whose NetEase candidates are being chosen from, with the candidates as they were when the sheet opened.
-    var candidatesFor: (row: TrackRow, candidates: [NeteaseSong])?
+    var candidatesFor: (row: TrackRow, candidates: [OnlineSong])?
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?
@@ -242,9 +242,9 @@ enum Route: Hashable {
                 if let library { loudness?.refresh(library.index) }
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
-            let fixtures = options.neteaseFixturesDir
+            let fixtures = options.onlineFixturesDir
             enrich = library.map { EnrichModel(store: store, library: $0,
-                                 client: NeteaseClient(configuration: fixtures.map(NeteaseFixtures.configuration) ?? .ephemeral),
+                                 client: OnlineClient(configuration: fixtures.map(OnlineFixtures.configuration) ?? .ephemeral),
                                  interval: fixtures == nil ? .milliseconds(600) : .zero) }
         } catch {
             startupError = String(describing: error)

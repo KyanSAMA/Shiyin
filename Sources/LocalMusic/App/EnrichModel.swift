@@ -21,7 +21,7 @@ import LocalMusicCore
     @ObservationIgnored private var loading: Task<Void, Never>?
     private static let maxFailures = 3
 
-    init(store: LibraryStore, library: LibraryModel, client: NeteaseClient, interval: Duration) {
+    init(store: LibraryStore, library: LibraryModel, client: OnlineClient, interval: Duration) {
         self.store = store
         self.library = library
         service = EnrichService(store: store, client: client, interval: interval)
@@ -51,10 +51,10 @@ import LocalMusicCore
     }
 
     /// The user's pick among the candidates. A queued lookup of the song is dropped; one in flight finishes first.
-    func choose(_ song: NeteaseSong, for row: TrackRow) async {
+    func choose(_ song: OnlineSong, for row: TrackRow) async {
         guard let job = job(row, songID: nil) else { return }
         dequeue(job.fingerprint)
-        do { try await service.apply(song, to: job, status: .confirmed, confidence: nil) } catch { notice = "补全失败：\(error)" }
+        do { try await service.apply(song, to: job, status: .confirmed) } catch { notice = "补全失败：\(error)" }
         await reloadMatch(job.fingerprint)
         await library.refresh()
     }
@@ -77,9 +77,10 @@ import LocalMusicCore
         matches[fingerprint] = try? await store.matches(fingerprint)[fingerprint]
     }
 
-    /// Once per URL until the sheet closes, also when it fails.
-    func loadThumbnail(_ url: URL) async {
-        guard requestedThumbnails.insert(url).inserted, let data = try? await service.thumbnail(url), let image = NSImage(data: data) else { return }
+    /// Once per cover until the sheet closes, also when it fails.
+    func loadThumbnail(_ song: OnlineSong) async {
+        guard let url = song.coverURL, requestedThumbnails.insert(url).inserted, let data = try? await service.thumbnail(song),
+              let image = NSImage(data: data) else { return }
         thumbnails[url] = image
     }
 

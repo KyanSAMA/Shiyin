@@ -121,7 +121,7 @@ import LocalMusicCore
 
     /// The songs as they'd show without manual edits.
     func uneditedRows(_ ids: [Int64]) async -> [TrackRow] {
-        (try? await store.rows(ids, without: .user)) ?? []
+        (try? await store.rows(ids, without: [.user])) ?? []
     }
 
     /// After enrichment stored new values.

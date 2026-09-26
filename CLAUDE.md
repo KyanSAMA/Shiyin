@@ -8,7 +8,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 自测：`Scripts/selftest.sh SelfTests/NN-*.json` → `.build/selftest/<name>/`（PNG、`*.state.json`、`report.json`、`app.log`）；退出码 0 通过 / 1 失败 / 2 超时或崩溃
 - 全部自测：`Scripts/run-all-selftests.sh`（结束时用 `find -newer` 证明 `~/Music` 未被写入）；夹具由 `Scripts/make-fixtures.sh` 生成到 `.build/fixtures`（改动时递增 VERSION）
 - 无障碍操作：`swift Scripts/ax-press.swift <文本>`（或先 `swiftc -O` 编译），对运行中 App 里标题/描述/值等于该文本的元素做 AX 选中行 / 按下
-- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`、`lmtool scan <db> [<根目录>...]`、`lmtool decode-check <路径>`、`lmtool loudness [--album] <路径>`、`lmtool netease search <关键词>|song <id>|lyric <id>|match <文件>`（真实请求网易云，只在开发验证时少量使用）；`Scripts/validate-loudness.sh` 对照 ffmpeg ebur128（30 首真实曲目，积分响度 ±0.5 LU、无损采样峰值 ±0.1 dB、≥20× 实时）；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
+- 解析校验：`lmtool tags [--stats] [--sha] <路径>`、`lmtool lrc <文件>`、`lmtool scan <db> [<根目录>...]`、`lmtool decode-check <路径>`、`lmtool loudness [--album] <路径>`、`lmtool online search|lyric <netease|qq|itunes|lrclib> <关键词>|song <网易云 id>|match <文件>`（真实请求在线来源，只在开发验证时少量使用）；`Scripts/validate-loudness.sh` 对照 ffmpeg ebur128（30 首真实曲目，积分响度 ±0.5 LU、无损采样峰值 ±0.1 dB、≥20× 实时）；`Scripts/validate-tags.sh` 用 metaflac / ffprobe 对照真实曲库（只读）
 
 ## 硬性约束
 - 只有 Command Line Tools：SwiftUI 宏插件缺失，禁用 `@State` / `@Entry` / `#Preview` / Animatable 宏；状态放 `@Observable` 模型，经 `.environment` 注入，`body` 里用 `@Bindable` 或 `Binding(get:set:)`
@@ -16,7 +16,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 零第三方依赖；ffmpeg / ffprobe / metaflac 只用于测试夹具和对照
 - 曲库只读：任何代码路径都不得写入曲库目录
 - 设置存 SQLite `setting` 表，不用 UserDefaults
-- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；显示值 = 手动编辑 > 文件标签 > 网易云 > 本地推断，在 `LibraryStore.rows()` 里合并
+- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并
 - 数据库迁移只追加，不修改已提交的迁移
 - 交给 AVFAudio / MediaPlayer / FSEvents 的回调闭包在 `LocalMusicCore` 的非隔离代码或 `nonisolated static` 工厂里构造，只捕获 Sendable 值，再 `Task { @MainActor in … }` 切回
 - App 目标默认 MainActor 隔离；纯逻辑放 `LocalMusicCore` 以便单测
@@ -30,7 +30,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - `Commands` 菜单只在打开时重读模型状态，且禁用的菜单项仍会吞掉自己的快捷键：带快捷键的菜单项不按动态状态禁用，由动作本身判断
 
 ## 自测
-- 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>] [--netease-fixtures <dir>]`（`selftest.sh` 默认传 `SelfTests/netease` 录制应答，`NETEASE_LIVE=1` 才连真实网易云）；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
+- 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>] [--online-fixtures <dir>]`（`selftest.sh` 默认传 `SelfTests/online` 录制应答，`ONLINE_LIVE=1` 才连真实的在线来源）；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
 - 动作：`wait` `settle` `window` `appearance` `activate` `sidebar` `snapshot`（`window: main|settings|mini|sheet`，sheet 为主窗口当前弹出的表单） `state` `assert` `waitUntil` `startLibrary`（`include`/`exclude`，缺省用已存/默认目录） `rescan` `fs`（`copy`/`remove`/`move`，只能动 `@out` 内） `openSettings` `play`（`title`/`format`/`minSampleRate`，`context: album|songs`） `togglePlayPause` `pause` `resume` `next` `previous` `seek` `setShuffle` `setRepeat` `measure`（输出 tap 电平/K 加权响度/跳变/空白，增益后、音量前） `enableNowPlaying` `search` `sort`（`column`: title/artist/album/year/duration/added，`ascending`） `openAlbum` `openPerson`（`role`: artist/composer；切到对应侧栏并选中） `back` `scrollList`（`steps`、`interval`；`steps: 0` 回到顶部） `perfReset` `showNowPlaying` `showQueue`（`value`，缺省 true） `seekToLyric`（`index`） `playNext`（`title`） `setNormalization`（`value`: off/track/album） `filter`（`albumArtists`/`years`/`genres`/`formats` 数组、`hiRes`/`hasLyrics` 布尔，都缺省即清空） `miniPlayer`（`value`，缺省 true） `focusSearch` `clearFocus` `focusList`（侧栏右侧的 SwiftUI 列表，如人物列表，取得键盘） `pressKey`（`key`: space/return/f/l/m/left/right/up/down，`modifiers`: command/shift/option，`repeat`；按前台 App 的路径走 `handleKey` → 窗口快捷键 → 菜单快捷键 → 窗口，因为 AppKit 不给非活动 App 匹配快捷键） `closeMainWindow` `openMainWindow` `setVolume`（`value`） `like`（`title`，缺省当前曲目；`value` 缺省 true） `promptPlaylist`（`titles` 新建 / `rename` 列表名，弹出命名框） `commitPlaylistPrompt`（`name`；模拟按下创建 / 重命名） `addToPlaylist` / `removeFromPlaylist`（`name`、`titles`） `movePlaylistTracks`（`name`、`titles`、`to` 移动前的位置） `deletePlaylist`（`name`） `editInfo`（`titles`、`fields` 以 EnrichField 名为键、`keepOpen`；经编辑表单保存） `closeEditInfo` `revertInfo`（`titles`） `enrich`（`titles`，缺省为「全部补全」；等队列跑完） `enrichFilter`（`value`: missingCover/missingLyrics/missingInfo/pending/done） `inspect`（`title`，把合并后的字段写进 `inspected.<标题>`） `openCandidates` / `chooseCandidate` / `rejectMatch`（都要 `title`，`chooseCandidate` 另有 `index`；选择匹配表单的三个操作）；`sidebar` 取 `playlist` 时用 `name` 指定列表 `quit`（先写报告，再走真实退出路径，含保存播放状态）
 - 状态键：`app` `ui`（含 `filterChips`、`searchFocused`、`nowPlaying`、`sort`、`selectionCount`、`person` 当前人物的名字/曲目数/专辑数、`playlistPrompt` 命名框标题、`playlist` 当前列表名） `windows`（含 `mini` 面板层级/空间/尺寸、`scrolls` 滚动偏移） `library`（含 `liked` 标题、`playlists` 名字和曲目标题） `player`（含 `queue`、`gainDb`、`skipNotice`） `lyrics` `loudness`（analyzed/failed/total/pending/mode） `measure` `nowPlayingInfo` `snapshots` `perf` `enrich`（`counts` 各分类数量、按匹配状态分组的标题） `inspected`
 - 自测模式关闭全部动画（根视图 `.transaction`）：显示器睡眠时动画不推进，带动画的滚动 / 转场会停在第一帧

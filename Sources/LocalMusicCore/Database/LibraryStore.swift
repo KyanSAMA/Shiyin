@@ -262,9 +262,11 @@ public actor LibraryStore {
     public func lyrics(for trackID: Int64) throws -> Lyrics? {
         // An empty or header-only sidecar parses to nil and must not hide embedded lyrics.
         let file = try db.query("SELECT lrc FROM lyrics WHERE track_id = ? ORDER BY source = 'sidecar' DESC", [trackID]) { $0.string(0) }
+        let sources = [EnrichSource.user] + onlineOrder().map(EnrichSource.online)
+        let rank = sources.enumerated().map { "WHEN '\($0.element.rawValue)' THEN \($0.offset)" }.joined(separator: " ") + " ELSE \(sources.count)"
         let enriched = try db.query("""
             SELECT e.value FROM enrichment e JOIN track t ON t.fingerprint = e.fingerprint
-            WHERE t.id = ? AND e.field = 'lyrics' ORDER BY e.source = 'user' DESC
+            WHERE t.id = ? AND e.field = 'lyrics' ORDER BY CASE e.source \(rank) END
             """, [trackID]) { $0.string(0) }
         return (file + enriched).lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
     }
@@ -298,42 +300,51 @@ public actor LibraryStore {
         }
     }
 
-    public func setMatch(_ fingerprint: String, _ status: MatchStatus, songID: Int64? = nil, confidence: Double? = nil,
-                         candidates: [NeteaseSong] = []) throws {
+    public func setMatch(_ fingerprint: String, _ status: MatchStatus, candidates: [OnlineSong] = []) throws {
         let json = candidates.isEmpty ? nil : String(decoding: try JSONEncoder().encode(candidates), as: UTF8.self)
-        try db.run("""
-            INSERT OR REPLACE INTO netease_match(fingerprint, song_id, confidence, status, candidates, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-            """, [fingerprint, songID, confidence, status.rawValue, json, Date().timeIntervalSince1970])
+        try db.run("INSERT OR REPLACE INTO online_match(fingerprint, status, candidates, updated_at) VALUES (?, ?, ?, ?)",
+                   [fingerprint, status.rawValue, json, Date().timeIntervalSince1970])
     }
 
-    /// Replaces the NetEase layer and records the match, in one transaction.
-    public func applyMatch(_ fingerprint: String, _ values: [EnrichField: String], _ status: MatchStatus, songID: Int64,
-                           confidence: Double?) throws {
+    /// Replaces these sources' layers (others stay) and records the match, in one transaction; returns the cover files
+    /// the replaced layers referenced and the new ones don't.
+    public func applyMatch(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus) throws -> [String] {
         try db.transaction {
-            try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, EnrichSource.netease.rawValue])
-            try setEnrichmentRows([fingerprint], values, source: .netease)
-            try setMatch(fingerprint, status, songID: songID, confidence: confidence)
+            var covers: [String] = []
+            for (source, values) in layers {
+                if let cover = try enrichment(fingerprint, source: .online(source))[.cover], cover != values[.cover] { covers.append(cover) }
+                try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, source.rawValue])
+                try setEnrichmentRows([fingerprint], values, source: .online(source))
+            }
+            try setMatch(fingerprint, status)
+            return covers
         }
     }
 
-    /// Drops the NetEase layer and marks the recording so batch enrichment leaves it alone; returns the cover file it
-    /// referenced.
-    public func rejectMatch(_ fingerprint: String) throws -> String? {
+    /// Drops every online layer and marks the recording so batch enrichment leaves it alone; returns the cover files
+    /// they referenced.
+    public func rejectMatch(_ fingerprint: String) throws -> [String] {
         try db.transaction {
-            let cover = try enrichment(fingerprint, source: .netease)[.cover]
-            try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, EnrichSource.netease.rawValue])
+            let covers = try db.query("SELECT value FROM enrichment WHERE fingerprint = ? AND field = 'cover' AND source != 'user'",
+                                      [fingerprint]) { $0.string(0)! }
+            try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source != 'user'", [fingerprint])
             try setMatch(fingerprint, .rejected)
-            return cover
+            return covers
         }
     }
 
     /// All matches, or one recording's.
     public func matches(_ fingerprint: String? = nil) throws -> [String: MatchState] {
-        let sql = "SELECT fingerprint, status, song_id, candidates FROM netease_match" + (fingerprint == nil ? "" : " WHERE fingerprint = ?")
+        let sql = "SELECT fingerprint, status, candidates FROM online_match" + (fingerprint == nil ? "" : " WHERE fingerprint = ?")
         return Dictionary(try db.query(sql, fingerprint.map { [$0] } ?? []) { r in
-            (r.string(0)!, MatchState(status: MatchStatus(rawValue: r.string(1)!) ?? .none, songID: r.int64(2),
-                                      candidates: r.string(3).flatMap { try? JSONDecoder().decode([NeteaseSong].self, from: Data($0.utf8)) } ?? []))
+            (r.string(0)!, MatchState(status: MatchStatus(rawValue: r.string(1)!) ?? .none,
+                                      candidates: r.string(2).flatMap { try? JSONDecoder().decode([OnlineSong].self, from: Data($0.utf8)) } ?? []))
         }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The order online layers show in.
+    private func onlineOrder() -> [OnlineSource] {
+        ((try? setting(OnlineSettings.key, as: OnlineSettings.self)) ?? .default).ordered
     }
 
     /// NetEase ids from the files' "163 key" comments.
@@ -350,10 +361,10 @@ public actor LibraryStore {
     }
 
     /// Playable tracks (files that failed to parse are kept only to avoid re-parsing them).
-    /// Tracks as shown: each field is a manual edit, else the file's tag, else online enrichment, else what the scan
-    /// inferred (title and track number from the file name, composers from lyrics credits). `ids` limits the result;
-    /// `without` leaves one source out (the edit sheet shows what clearing a manual edit would reveal).
-    public func rows(_ ids: [Int64]? = nil, without skipped: EnrichSource? = nil) throws -> [TrackRow] {
+    /// Tracks as shown: each field is a manual edit, else the file's tag, else the online layers in the user's order,
+    /// else what the scan inferred (title and track number from the file name, composers from lyrics credits). `ids`
+    /// limits the result; `without` leaves layers out (the edit sheet shows what clearing a manual edit would reveal).
+    public func rows(_ ids: [Int64]? = nil, without skipped: [EnrichSource] = []) throws -> [TrackRow] {
         func only(_ column: String) -> String { ids.map { " AND \(column) IN (\($0.map(String.init).joined(separator: ",")))" } ?? "" }
         var people: [Int64: (artists: [String], composers: [String], credited: [String])] = [:]
         let credits = try db.query("""
@@ -370,10 +381,10 @@ public actor LibraryStore {
         let enrichment = try db.query("SELECT fingerprint, field, source, CASE field WHEN 'lyrics' THEN '' ELSE value END FROM enrichment") {
             ($0.string(0)!, EnrichField(rawValue: $0.string(1)!), EnrichSource(rawValue: $0.string(2)!), $0.string(3)!)
         }
-        for case let (fingerprint, field?, source?, value) in enrichment where source != skipped {
+        for case let (fingerprint, field?, source?, value) in enrichment where !skipped.contains(source) {
             layers[fingerprint, default: [:]][field, default: [:]][source] = value
         }
-        let covers = coversDirectory
+        let covers = coversDirectory, order = onlineOrder().map(EnrichSource.online)
         return try db.query("""
             SELECT id, path, title, album, album_artist, track_no, disc_no, year, genre, duration, format, sample_rate,
                    bit_depth, has_cover, has_lyrics, added_at, file_mtime, cover_offset, cover_length, codec, fingerprint, title_source,
@@ -382,13 +393,14 @@ public actor LibraryStore {
             """) { r in
             let id = r.int64(0)!, fingerprint = r.string(20)
             let layer = fingerprint.flatMap { layers[$0] } ?? [:]
+            func online(_ field: EnrichField) -> String? { layer[field].flatMap { values in order.lazy.compactMap { values[$0] }.first } }
             func pick(_ field: EnrichField, _ file: String?, inferred: String? = nil) -> String? {
-                layer[field]?[.user] ?? file ?? layer[field]?[.netease] ?? inferred
+                layer[field]?[.user] ?? file ?? online(field) ?? inferred
             }
             func names(_ field: EnrichField, _ file: [String], inferred: [String] = []) -> [String] {
                 if let user = layer[field]?[.user] { return EnrichField.decode(user) }
                 if !file.isEmpty { return file }
-                return layer[field]?[.netease].map(EnrichField.decode) ?? inferred
+                return online(field).map(EnrichField.decode) ?? inferred
             }
             let title = r.string(2) ?? "", tagged = r.string(21) == ValueSource.tag.rawValue
             let credited = people[id]
@@ -404,7 +416,7 @@ public actor LibraryStore {
                             bitDepth: r.int(12), hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18),
                             hasLyrics: r.int(14) == 1 || layer[.lyrics] != nil, addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0),
                             fileMtime: r.double(16) ?? 0, fingerprint: fingerprint, hasFileLyrics: r.int(14) == 1,
-                            coverFile: (layer[.cover]?[.user] ?? layer[.cover]?[.netease]).map { covers.appending(path: $0).path })
+                            coverFile: (layer[.cover]?[.user] ?? online(.cover)).map { covers.appending(path: $0).path })
         }
     }
 }

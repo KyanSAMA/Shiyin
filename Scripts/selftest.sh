@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run one self-test script against a fresh debug bundle.
-# Usage: Scripts/selftest.sh SelfTests/01-shell.json   (SKIP_BUNDLE=1 to reuse build/LocalMusic.app; NETEASE_LIVE=1 to
-# reach the real NetEase API instead of SelfTests/netease)
+# Usage: Scripts/selftest.sh SelfTests/01-shell.json   (SKIP_BUNDLE=1 to reuse build/LocalMusic.app; ONLINE_LIVE=1 to
+# reach the real online sources instead of the recordings in SelfTests/online)
 # Exit: 0 pass, 1 assertion/script failure, 2 timeout or crash.
 set -uo pipefail
 SCRIPT=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -20,7 +20,7 @@ run() {
   perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' 600 \
     build/LocalMusic.app/Contents/MacOS/LocalMusic \
     --selftest "$1" --out "$2" --data-dir "$OUT/data" --fixtures .build/fixtures \
-    $([ "${NETEASE_LIVE:-0}" = 1 ] || echo --netease-fixtures SelfTests/netease) \
+    $([ "${ONLINE_LIVE:-0}" = 1 ] || echo --online-fixtures SelfTests/online) \
     -ApplePersistenceIgnoreState YES > "$2/app.log" 2>&1
   local code=$?
   [ $code -gt 2 ] && code=2

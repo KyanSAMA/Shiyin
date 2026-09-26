@@ -68,6 +68,21 @@ enum Schema {
         CREATE INDEX idx_track_fingerprint ON track(fingerprint);
         ALTER TABLE track ADD COLUMN track_no_source TEXT;
         """,
+        """
+        CREATE TABLE enrichment_v5(
+          fingerprint TEXT NOT NULL, field TEXT NOT NULL, source TEXT NOT NULL,
+          value TEXT NOT NULL, updated_at REAL NOT NULL,
+          PRIMARY KEY(fingerprint, field, source)) WITHOUT ROWID;
+        INSERT INTO enrichment_v5 SELECT fingerprint, field, source, value, updated_at FROM enrichment;
+        DROP TABLE enrichment;
+        ALTER TABLE enrichment_v5 RENAME TO enrichment;
+        CREATE TABLE online_match(
+          fingerprint TEXT PRIMARY KEY,
+          status TEXT NOT NULL CHECK(status IN ('auto','confirmed','pending','none','rejected')),
+          candidates TEXT, updated_at REAL NOT NULL);
+        INSERT INTO online_match SELECT fingerprint, status, candidates, updated_at FROM netease_match;
+        DROP TABLE netease_match;
+        """,
     ]
 
     static func migrate(_ db: Database) throws {

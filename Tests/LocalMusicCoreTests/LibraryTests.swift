@@ -145,11 +145,11 @@ struct LibraryScannerTests {
         let fingerprint = try #require(try await lib.store.rows().first?.fingerprint)
         let netease: [EnrichField: String?] = [.title: "Net", .album: "Net Album", .year: "2020", .artists: EnrichField.encode(["N"]),
                                                .composers: EnrichField.encode(["C"]), .lyrics: "[00:01.00]hi"]
-        try await lib.store.setEnrichment([fingerprint], netease, source: .netease)
+        try await lib.store.setEnrichment([fingerprint], netease, source: .online(.netease))
         var row = try #require(try await lib.store.rows().first)
         #expect(row.title == "Net" && row.album == "Tagged" && row.year == 2020 && row.artists == ["A"] && row.composers == ["C"])
         #expect(row.hasLyrics && row.trackNo == 1)
-        try await lib.store.setEnrichment([fingerprint], [.trackNo: "7"], source: .netease)
+        try await lib.store.setEnrichment([fingerprint], [.trackNo: "7"], source: .online(.netease))
         #expect(try await lib.store.rows().first?.trackNo == 7)   // "01 From Name" only inferred it
         guard case .synced(let lines)? = try await lib.store.lyrics(for: row.id) else { Issue.record("no enriched lyrics"); return }
         #expect(lines.map(\.text) == ["hi"])
@@ -162,10 +162,20 @@ struct LibraryScannerTests {
         _ = try await lib.scan()
         row = try #require(try await lib.store.rows().first)
         #expect(row.title == "Mine" && row.album == "My Album" && row.fingerprint == fingerprint)
-        #expect(try await lib.store.rows([row.id], without: .user).first?.title == "Net")
+        #expect(try await lib.store.rows([row.id], without: [.user]).first?.title == "Net")
 
         try await lib.store.clearEnrichment([fingerprint], source: .user)
         #expect(try await lib.store.rows().first?.album == "Tagged")
+
+        // Online layers show in the user's order.
+        try await lib.store.setEnrichment([fingerprint], [.title: "QQ", .genre: "Pop", .lyrics: "[00:01.00]qq"], source: .online(.qq))
+        row = try #require(try await lib.store.rows().first)
+        #expect(row.title == "Net" && row.genre == "Pop")
+        try await lib.store.setSetting(OnlineSettings.key, OnlineSettings(order: [.qq], disabled: [], storefront: "jp"))
+        #expect(try await lib.store.rows().first?.title == "QQ")
+        guard case .synced(let qq)? = try await lib.store.lyrics(for: row.id) else { Issue.record("no enriched lyrics"); return }
+        #expect(qq.map(\.text) == ["qq"])
+        #expect(try await lib.store.rows(without: EnrichSource.allOnline).first?.title == "Back")
 
         try await lib.store.run("UPDATE track SET fingerprint = NULL")
         #expect(try await lib.scan().parsed == 1)

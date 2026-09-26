@@ -7,7 +7,7 @@ struct CandidatePicker: View {
     let model: AppModel
     let enrich: EnrichModel
     let row: TrackRow
-    let candidates: [NeteaseSong]
+    let candidates: [OnlineSong]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,7 +23,7 @@ struct CandidatePicker: View {
                         .overlay { if let image = song.coverURL.flatMap({ enrich.thumbnails[$0] }) { Image(nsImage: image).resizable().scaledToFill() } }
                         .frame(width: 44, height: 44)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
-                        .task { if let url = song.coverURL { await enrich.loadThumbnail(url) } }
+                        .task { await enrich.loadThumbnail(song) }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(song.title).lineLimit(1)
                         Text(([song.artists.joined(separator: " / "), song.album] + [song.year.map(String.init)].compactMap { $0 })
@@ -56,7 +56,7 @@ struct CandidatePicker: View {
         .onDisappear { enrich.clearThumbnails() }
     }
 
-    private func choose(_ song: NeteaseSong) {
+    private func choose(_ song: OnlineSong) {
         model.ui.candidatesFor = nil
         Task { await enrich.choose(song, for: row) }
     }

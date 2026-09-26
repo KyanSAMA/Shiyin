@@ -60,7 +60,7 @@ struct AudioFingerprintTests {
     }
 }
 
-struct NeteaseTests {
+struct OnlineTests {
     /// Trimmed from real responses (2026-09).
     static let search = #"""
         {"code":200,"result":{"songCount":3,"songs":[
@@ -77,30 +77,82 @@ struct NeteaseTests {
          "tlyric":{"lyric":"[by:someone]\n[00:00.440]莎啦啦啦\n[00:03.45]飞上天空眺望这条街道\n"}}
         """#
 
-    private func client() throws -> NeteaseClient {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "lm-netease-\(UUID().uuidString)")
-        for (file, body) in [("search/群青 YOASOBI.json", Self.search), ("song/418602075.json", Self.detail), ("lyric/418602075.json", Self.lyric)] {
+    static let qqSearch = #"""
+        {"code":0,"req":{"code":0,"data":{"body":{"song":{"list":[
+         {"mid":"001V1NtH360djY","name":"浸春芜","singer":[{"name":"塞壬唱片-MSR"},{"name":"宋柏"}],"album":{"name":"浸春芜","mid":"001HIMuf2FjK6o"},
+          "time_public":"2024-02-01","index_album":1,"index_cd":0,"interval":223},
+         {"mid":"x","name":"无专辑","singer":[],"album":{"name":"","mid":""},"time_public":"","index_album":0,"index_cd":1,"interval":100}]}}}}}
+        """#
+    static let qqLyric = #"""
+        {"retcode":0,"code":0,"lyric":"[ti:浸春芜]\n[00:00.00]浸春芜 - 塞壬唱片-MSR/宋柏\n[00:23.82]词：宋柏\n[00:27.80]曲：十音\n[00:31.77]草木生 春耕农忙 &apos;&#38;&amp;",
+         "trans":"[00:23.82]//\n[00:31.77]Spring"}
+        """#
+    static let itunes = #"""
+        {"resultCount":1,"results":[{"trackId":1741411577,"trackName":"浸春蕪","artistName":"塞壬唱片-MSR, 宋柏, 十音 & 解偉苓",
+         "collectionName":"浸春蕪 - Single","artworkUrl100":"https://is1-ssl.mzstatic.com/image/thumb/Music/v4/a/b.jpg/100x100bb.jpg",
+         "trackTimeMillis":223412,"trackNumber":1,"discNumber":1,"releaseDate":"2023-12-31T15:00:00Z","primaryGenreName":"Tai-Pop"}]}
+        """#
+    static let lrclib = #"""
+        [{"id":7,"trackName":"群青","artistName":"YOASOBI","albumName":"THE BOOK","duration":248.0,"instrumental":false,
+          "plainLyrics":"嗚呼","syncedLyrics":"[00:01.49]嗚呼"},
+         {"id":8,"trackName":"Instrumental","artistName":"X","albumName":"Y","duration":60,"instrumental":true,"plainLyrics":null,"syncedLyrics":null}]
+        """#
+
+    private func client() throws -> OnlineClient {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "lm-online-\(UUID().uuidString)")
+        for (file, body) in [("netease/search/群青 YOASOBI.json", Self.search), ("netease/song/418602075.json", Self.detail),
+                             ("netease/lyric/418602075.json", Self.lyric), ("qq/search/浸春芜.json", Self.qqSearch),
+                             ("qq/lyric/001V1NtH360djY.json", Self.qqLyric), ("itunes/浸春芜.json", Self.itunes), ("lrclib/群青.json", Self.lrclib)] {
             let url = directory.appending(path: file)
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(body.utf8).write(to: url)
         }
-        return NeteaseClient(configuration: NeteaseFixtures.configuration(directory: directory))
+        return OnlineClient(configuration: OnlineFixtures.configuration(directory: directory))
     }
 
     @Test func parsesSearchDetailAndMergedLyrics() async throws {
         let client = try client()
-        let songs = try await client.search("群青 YOASOBI")
-        #expect(songs.map(\.id) == [1472480890, 1500151581, 2007396062])
-        #expect(songs[1] == NeteaseSong(id: 1500151581, title: "群青", artists: ["YOASOBI"], album: "THE BOOK",
-                                        coverURL: URL(string: "http://p2.music.126.net/b/2.jpg"), duration: 248.444, trackNo: 6, discNo: 1, year: 2021))
-        let song = try #require(try await client.song(418602075))
+        let songs = try await client.search(.netease, "群青 YOASOBI")
+        #expect(songs.map(\.id) == ["1472480890", "1500151581", "2007396062"])
+        #expect(songs[1] == OnlineSong(source: .netease, id: "1500151581", title: "群青", artists: ["YOASOBI"], album: "THE BOOK",
+                                       coverURL: URL(string: "http://p2.music.126.net/b/2.jpg"), duration: 248.444, trackNo: 6, discNo: 1, year: 2021))
+        let song = try #require(try await client.neteaseSong(418602075))
         #expect(song.artists == ["miwa", "96猫"] && song.discNo == 1 && song.year == 2016 && song.duration == 243.026)
-        #expect(try await client.search("nothing").isEmpty)
-        let lyrics = try #require(try await client.lyrics(418602075))
+        #expect(try await client.search(.netease, "nothing").isEmpty)
+        let lyrics = try #require(try await client.lyrics(song))
         guard case .synced(let lines)? = LRCParser.parse(lyrics) else { Issue.record("unsynced"); return }
         #expect(lines.first { $0.text == "シャンランランラン" }?.translation == "莎啦啦啦")
         #expect(LRCParser.parse(lyrics)?.credits.composers == ["miwa", "NAOKI-T"])
-        #expect(try await client.lyrics(1) == nil)
+        #expect(try await client.lyrics(OnlineSong(source: .netease, id: "1", title: "", artists: [], album: "", coverURL: nil, duration: 0,
+                                                   trackNo: nil, discNo: nil, year: nil)) == nil)
+        #expect(OnlineClient.coverURL(song, pixels: 100)?.absoluteString == "https://p2.music.126.net/c/3.jpg?param=100y100")
+    }
+
+    @Test func parsesQQMusicITunesAndLRCLib() async throws {
+        let client = try client()
+        let qq = try await client.search(.qq, "浸春芜")
+        #expect(qq[0] == OnlineSong(source: .qq, id: "001V1NtH360djY", title: "浸春芜", artists: ["塞壬唱片-MSR", "宋柏"], album: "浸春芜",
+                                    coverURL: URL(string: "https://y.gtimg.cn/music/photo_new/T002R1200x1200M000001HIMuf2FjK6o.jpg"),
+                                    duration: 223, trackNo: 1, discNo: 1, year: 2024))
+        #expect(qq[1].coverURL == nil && qq[1].year == nil && qq[1].discNo == 2)
+        #expect(OnlineClient.coverURL(qq[0], pixels: 100)?.lastPathComponent == "T002R150x150M000001HIMuf2FjK6o.jpg")
+        let lyrics = try #require(try await client.lyrics(qq[0]))
+        #expect(!lyrics.contains("浸春芜 - "))
+        guard case .synced(let lines)? = LRCParser.parse(lyrics) else { Issue.record("unsynced"); return }
+        #expect(lines.last?.text == "草木生 春耕农忙 '&&" && lines.last?.translation == "Spring")
+        #expect(LRCParser.parse(lyrics)?.credits.composers == ["十音"])
+        #expect(try await client.lyrics(qq[1]) == nil)
+
+        let itunes = try #require(try await client.search(.itunes, "浸春芜").first)
+        #expect(itunes.artists == ["塞壬唱片-MSR", "宋柏", "十音", "解偉苓"])
+        #expect(itunes.album == "浸春蕪" && itunes.year == 2024 && itunes.genre == "Tai-Pop" && itunes.duration == 223.412)
+        #expect(OnlineClient.coverURL(itunes, pixels: 1200)?.lastPathComponent == "1200x1200bb.jpg")
+        let query = MatchQuery(title: "浸春芜", artists: ["解伟苓"], album: nil, duration: 223)
+        guard case .confident = Matcher.match(query, candidates: [itunes]) else { Issue.record("traditional / split artists unmatched"); return }
+
+        let lrclib = try await client.search(.lrclib, "群青")
+        #expect(lrclib.map(\.lyrics) == ["[00:01.49]嗚呼", nil] && lrclib[0].album == "THE BOOK")
+        #expect(try await client.lyrics(lrclib[0]) == "[00:01.49]嗚呼")
     }
 
     @Test func decodesThe163Key() throws {
@@ -121,14 +173,20 @@ struct NeteaseTests {
 
     @Test func matchesByTitleArtistAndDurationWithTheAlbumBreakingTies() throws {
         let songs = try JSONSerialization.jsonObject(with: Data(Self.search.utf8)) as! [String: Any]
-        let candidates = ((songs["result"] as! [String: Any])["songs"] as! [[String: Any]]).compactMap(NeteaseClient.searchSong)
+        let candidates = ((songs["result"] as! [String: Any])["songs"] as! [[String: Any]]).compactMap(OnlineClient.neteaseSearchSong)
         func match(_ title: String, _ artists: [String], album: String? = nil, duration: Double = 248.4) -> MatchResult {
             Matcher.match(MatchQuery(title: title, artists: artists, album: album, duration: duration), candidates: candidates)
         }
         guard case .confident(let best, _) = match("群青", ["YOASOBI"], album: "THE BOOK") else { Issue.record("not confident"); return }
-        #expect(best.id == 1500151581)
+        #expect(best.id == "1500151581")
         guard case .confident(let single, _) = match("群青", ["YOASOBI"]) else { Issue.record("not confident"); return }
-        #expect(single.id == 1472480890)
+        #expect(single.id == "1472480890")
+        guard case .confident = match("群青", ["グンジョウ"], album: "THE BOOK") else { Issue.record("album doesn't stand in for the artist"); return }
+        guard case .uncertain = match("群青", ["グンジョウ"], album: "群青") else { Issue.record("a single's album stood in for the artist"); return }
+        let duo = OnlineSong(source: .netease, id: "1", title: "The Boxer", artists: ["Simon & Garfunkel"], album: "", coverURL: nil,
+                             duration: 300, trackNo: nil, discNo: nil, year: nil)
+        guard case .confident = Matcher.match(MatchQuery(title: "The Boxer", artists: ["Simon & Garfunkel"], album: nil, duration: 300),
+                                              candidates: [duo]) else { Issue.record("duo name split"); return }
         guard case .uncertain(let options) = match("群青", ["Someone Else"]) else { Issue.record("not uncertain"); return }
         #expect(options.count == 3)
         guard case .uncertain = match("群青", ["YOASOBI"], duration: 200) else { Issue.record("duration ignored"); return }

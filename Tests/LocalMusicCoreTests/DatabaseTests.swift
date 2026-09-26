@@ -15,11 +15,25 @@ struct DatabaseTests {
             try Schema.migrate(db)
             #expect(try db.userVersion() == Schema.migrations.count)
             let tables = try db.query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name") { $0.string(0)! }
-            #expect(tables == ["enrichment", "library_root", "liked", "loudness", "lyrics", "netease_match", "playlist", "playlist_item", "setting", "track", "track_person"])
+            #expect(tables == ["enrichment", "library_root", "liked", "loudness", "lyrics", "online_match", "playlist", "playlist_item", "setting", "track", "track_person"])
         }
         let db = try Database(url: url)
         try Schema.migrate(db)
         #expect(try db.userVersion() == Schema.migrations.count)
+    }
+
+    @Test func v5KeepsEnrichmentAndMatchesAndAcceptsOtherSources() throws {
+        let db = try Database(path: ":memory:")
+        try db.execute(Schema.migrations[0..<4].joined() + "PRAGMA user_version = 4;")
+        let candidates = #"[{"id":2001,"title":"春日影","artists":["MyGO!!!!!"],"album":"迷跡波","duration":274,"year":2023}]"#
+        try db.run("INSERT INTO enrichment VALUES ('flac:1', 'year', 'netease', '2023', 1)")
+        try db.run("INSERT INTO netease_match VALUES ('flac:1', 2001, 0.5, 'pending', ?, 1)", [candidates])
+        try Schema.migrate(db)
+        #expect(try db.query("SELECT field, source, value FROM enrichment") { [$0.string(0)!, $0.string(1)!, $0.string(2)!] } == [["year", "netease", "2023"]])
+        try db.run("INSERT INTO enrichment VALUES ('flac:1', 'genre', 'itunes', 'Pop', 1)")
+        let stored = try #require(try db.query("SELECT status, candidates FROM online_match") { ($0.string(0)!, $0.string(1)!) }.first)
+        let songs = try JSONDecoder().decode([OnlineSong].self, from: Data(stored.1.utf8))
+        #expect(stored.0 == "pending" && songs.map(\.source) == [.netease] && songs.map(\.id) == ["2001"] && songs[0].year == 2023)
     }
 
     @Test func refusesNewerSchema() throws {
