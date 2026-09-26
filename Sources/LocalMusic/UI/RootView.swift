@@ -62,6 +62,7 @@ struct RootView: View {
             switch sheet {
             case .editor(let editor): InfoEditorView(model: model, editor: editor)
             case .picker(let picker): if let enrich = model.enrich { MatchPickerView(model: model, enrich: enrich, picker: picker) }
+            case .write(let plan): TagWriteView(model: model, plan: plan)
             }
         }
         .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",

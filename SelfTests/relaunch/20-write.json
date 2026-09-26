@@ -1,0 +1,22 @@
+{
+  "timeout": 90,
+  "window": { "width": 1440, "height": 900 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "library.scanning", "equals": false, "timeout": 10 },
+    { "do": "readFile", "title": "群青", "as": "after" },
+    { "do": "assert", "path": "fileTags.after.ALBUM", "equals": "写入专辑" },
+    { "do": "assert", "path": "library.backedUp", "equals": ["02 群青.flac"] },
+    { "do": "restoreTags", "titles": ["群青"] },
+    { "do": "assert", "path": "tagPlan.finished", "equals": true },
+    { "do": "assert", "path": "tagPlan.failures", "equals": [] },
+    { "do": "closeEditInfo" },
+    { "do": "readFile", "title": "群青", "as": "restored" },
+    { "do": "readFile", "path": "@fixtures/library/THE BOOK/02 群青.flac", "as": "pristine" },
+    { "do": "assert", "path": "fileTags.restored.sha", "equalsPath": "fileTags.pristine.sha" },
+    { "do": "assert", "path": "library.backedUp", "equals": [] },
+    { "do": "inspect", "title": "群青" },
+    { "do": "assert", "path": "inspected.群青.album", "equals": "写入专辑" },
+    { "do": "quit" }
+  ]
+}

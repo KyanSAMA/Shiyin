@@ -103,16 +103,19 @@ enum Route: Hashable {
     case album(String)
 }
 
-/// 编辑信息 or 选择匹配; one slot, so either can hand over to the other.
+/// 编辑信息, 选择匹配 or 写入文件; one slot, so one can hand over to another.
 enum SongSheet: Identifiable {
-    case editor(InfoEditor), picker(MatchPicker)
+    case editor(InfoEditor), picker(MatchPicker), write(TagWritePlan)
 
     var id: ObjectIdentifier {
         switch self {
         case .editor(let editor): ObjectIdentifier(editor)
         case .picker(let picker): ObjectIdentifier(picker)
+        case .write(let plan): ObjectIdentifier(plan)
         }
     }
+
+    var plan: TagWritePlan? { if case .write(let plan) = self { plan } else { nil } }
 
     var editor: InfoEditor? { if case .editor(let editor) = self { editor } else { nil } }
     var picker: MatchPicker? { if case .picker(let picker) = self { picker } else { nil } }

@@ -7,6 +7,8 @@ public struct FileVersion: Sendable, Codable, Equatable {
     public let size: Int64
     public let mtime: Double
 
+    public init(size: Int64, mtime: Double) { (self.size, self.mtime) = (size, mtime) }
+
     public init(_ url: URL) throws {
         var url = url
         url.removeAllCachedResourceValues()   // a URL caches what it read, which would hide a change

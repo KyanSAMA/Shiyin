@@ -20,6 +20,11 @@ struct AlbumsGrid: View {
                         AddToPlaylistMenu(model: model, tracks: album.trackIDs)
                         Divider()
                         Button("编辑信息…") { Task { await model.editInfo(album.trackIDs.compactMap { index.tracks[$0] }) } }
+                        Button("写入文件…") { Task { await model.planTagWrite(album.trackIDs.compactMap { index.tracks[$0] }) } }
+                        if let backedUp = model.library?.backedUp, !backedUp.isEmpty,
+                           case let rows = album.trackIDs.compactMap({ index.tracks[$0] }), rows.contains(where: { backedUp.contains($0.path) }) {
+                            Button("恢复原标签…") { model.planTagRestore(rows) }
+                        }
                     }
                 }
             }

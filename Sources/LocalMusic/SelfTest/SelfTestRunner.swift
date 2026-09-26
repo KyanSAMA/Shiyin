@@ -28,6 +28,7 @@ final class SelfTestRunner {
     private var snapshots: [String: Any] = [:]
     private var measures: [String: Any] = [:]
     private var inspected: [String: Any] = [:]
+    private var fileTags: [String: Any] = [:]
     private var fileCounter = 0
 
     init(model: AppModel) {
@@ -246,6 +247,29 @@ final class SelfTestRunner {
                 editor?.lyricsChooser = nil
             }
             try await settle()
+        case "writeTags", "restoreTags":
+            // Plans 写入文件 / 恢复原标签 for `titles` (unless a plan is open) and, unless `keepOpen`, runs it to the end;
+            // `manual` / `online` pick the groups.
+            let index = try library().index
+            if model.ui.sheet?.plan == nil {
+                let rows = try trackIDs(step).compactMap { index.tracks[$0] }
+                if step.string("do") == "writeTags" { await model.planTagWrite(rows) } else { model.planTagRestore(rows) }
+            }
+            guard let plan = model.ui.sheet?.plan else { throw SelfTestFailure(description: "no write plan") }
+            if let manual = step["manual"] as? Bool { plan.includeManual = manual }
+            if let online = step["online"] as? Bool { plan.includeOnline = online }
+            if step["keepOpen"] as? Bool != true {
+                model.runTagPlan(plan)
+                await plan.run?.value
+            }
+            try await settle()
+        case "readFile":
+            // A file's own tags and SHA-256, straight from disk (`title`, or `path`), into `fileTags.<as>`.
+            let url = try step.string("path").map { URL(filePath: resolve($0)) } ?? song(step.required("title")).url
+            let raw = try await TagReader.read(url)
+            var tags: Step = ["sha": TagReader.sha256(try Data(contentsOf: url)), "hasCover": raw.cover != nil]
+            for (key, values) in raw.tags.fields { tags[key] = values.count == 1 ? values[0] : values }
+            fileTags[try step.string("as") ?? step.required("title")] = tags
         case "saveEditInfo":
             guard let editor = model.ui.sheet?.editor else { throw SelfTestFailure(description: "no edit sheet") }
             await model.saveInfo(editor)
@@ -626,6 +650,9 @@ final class SelfTestRunner {
 
     private func check(_ step: Step) throws {
         let path = try step.required("path")
+        var step = step
+        // `equalsPath`: equal to another state value.
+        if let other = step.string("equalsPath") { step["equals"] = JSONQuery.value(at: other, in: state()) ?? NSNull() }
         guard let comparison = Comparison(step) else { throw SelfTestFailure(description: "missing comparator") }
         let actual = JSONQuery.value(at: path, in: state())
         guard comparison.matches(actual) else {
@@ -738,6 +765,12 @@ final class SelfTestRunner {
             "enrich": model.enrich.map(enrichState) ?? NSNull(),
             "picker": model.ui.sheet?.picker.map(pickerState) ?? NSNull(),
             "editor": model.ui.sheet?.editor.map(editorState) ?? NSNull(),
+            "fileTags": fileTags,
+            "tagPlan": model.ui.sheet?.plan.map { plan in
+                ["items": Dictionary(plan.items.map { ($0.row.title, ["changes": plan.changes($0).map(\.field.rawValue), "skip": $0.skip ?? NSNull()] as Step) },
+                                     uniquingKeysWith: { first, _ in first }),
+                 "done": plan.done, "finished": plan.finished, "failures": plan.failures.map { "\($0.title)：\($0.reason)" }] as Step
+            } ?? NSNull(),
             "lyricsChooser": (model.ui.sheet?.picker?.lyricsChooser ?? model.ui.sheet?.editor?.lyricsChooser).map { chooser in
                 ["keywords": chooser.keywords, "options": chooser.options.map(\.key), "selection": chooser.selection ?? NSNull(),
                  "searching": chooser.searching] as Step
@@ -763,6 +796,7 @@ final class SelfTestRunner {
             "artistCount": index.artists.count, "composerCount": index.composers.count,
             "firstSongs": index.songs.prefix(5).map(\.title),
             "liked": library.liked.keys.compactMap { index.tracks[$0]?.title }.sorted(),
+            "backedUp": library.backedUp.map { URL(filePath: $0).lastPathComponent }.sorted(),
             "playlists": library.playlists.map { ["name": $0.name, "titles": $0.trackIDs.compactMap { index.tracks[$0]?.title }] as Step },
             "roots": ["include": library.roots.include, "exclude": library.roots.exclude],
             "lastScan": library.lastScan.map {

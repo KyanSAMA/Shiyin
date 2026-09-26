@@ -280,6 +280,10 @@ struct SongsTableView: NSViewRepresentable {
             add("编辑信息…", #selector(editInfo))
             add("在线补全信息", #selector(enrich))
             if picked.count == 1 { add("选择匹配…", #selector(chooseMatch)) }
+            add("写入文件…", #selector(writeTags))
+            if let backedUp = model.library?.backedUp, !backedUp.isEmpty, picked.contains(where: { backedUp.contains($0.path) }) {
+                add("恢复原标签…", #selector(restoreTags))
+            }
             menu.addItem(.separator())
             add("在访达中显示", #selector(reveal))
         }
@@ -296,6 +300,8 @@ struct SongsTableView: NSViewRepresentable {
         @objc private func editInfo(_ item: NSMenuItem) { Task { await model.editInfo(picked(item)) } }
         @objc private func enrich(_ item: NSMenuItem) { model.enrich?.enrich(picked(item)) }
         @objc private func chooseMatch(_ item: NSMenuItem) { if let row = picked(item).first { Task { await model.chooseMatch(row) } } }
+        @objc private func writeTags(_ item: NSMenuItem) { Task { await model.planTagWrite(picked(item)) } }
+        @objc private func restoreTags(_ item: NSMenuItem) { model.planTagRestore(picked(item)) }
         @objc private func toggleLiked(_ item: NSMenuItem) { model.library?.setLiked(picked(item).map(\.id), item.tag == 1) }
         private func picked(_ item: NSMenuItem) -> [TrackRow] { item.representedObject as? [TrackRow] ?? [] }
     }

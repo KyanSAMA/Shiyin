@@ -17,6 +17,10 @@ public struct CoverRef: Sendable, Equatable {
     public var length: Int
     public var mime: String?
     public var pictureType: Int
+
+    public init(offset: Int64?, length: Int, mime: String?, pictureType: Int) {
+        (self.offset, self.length, self.mime, self.pictureType) = (offset, length, mime, pictureType)
+    }
 }
 
 /// Raw tag fields keyed by upper-cased Vorbis-style names (TITLE, ARTIST, …); blank values are dropped.

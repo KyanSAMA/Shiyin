@@ -83,6 +83,12 @@ enum Schema {
         INSERT INTO online_match SELECT fingerprint, status, candidates, updated_at FROM netease_match;
         DROP TABLE netease_match;
         """,
+        """
+        CREATE TABLE tag_backup(
+          id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, format TEXT NOT NULL, audio_sha256 TEXT NOT NULL,
+          original_size INTEGER NOT NULL, original_mtime REAL NOT NULL, written_size INTEGER, written_mtime REAL,
+          moved_edits TEXT, state TEXT NOT NULL CHECK(state IN ('pending','written')), updated_at REAL NOT NULL);
+        """,
     ]
 
     static func migrate(_ db: Database) throws {

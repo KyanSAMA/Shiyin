@@ -58,6 +58,13 @@ struct EnrichView: View {
                     } else if !picked.isEmpty {
                         Button("重新查找") { enrich.enrich(picked) }
                     }
+                    if !picked.isEmpty {
+                        Divider()
+                        Button("写入文件…") { Task { await model.planTagWrite(picked) } }
+                        if let backedUp = model.library?.backedUp, !backedUp.isEmpty, picked.contains(where: { backedUp.contains($0.path) }) {
+                            Button("恢复原标签…") { model.planTagRestore(picked) }
+                        }
+                    }
                 } primaryAction: { ids in
                     // Double-click or Return plays from that song through the list.
                     if let index = rows.firstIndex(where: { ids.contains($0.id) }) { model.player?.play(rows.map(\.id), startAt: index) }

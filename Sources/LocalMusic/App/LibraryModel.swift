@@ -12,7 +12,9 @@ import LocalMusicCore
     private(set) var liked: [Int64: Date] = [:]
     private(set) var playlists: [Playlist] = []
 
-    @ObservationIgnored private let store: LibraryStore
+    @ObservationIgnored let store: LibraryStore
+    /// Files with a tag backup (written to by the app), which 恢复原标签 can put back.
+    private(set) var backedUp: Set<String> = []
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var scanTask: Task<Void, Never>?
@@ -34,6 +36,7 @@ import LocalMusicCore
             roots = try await store.roots()
             liked = try await store.liked()
             playlists = try await store.playlists()
+            try await store.recoverTagWrites()
             try await reload()
         } catch {
             lastError = String(describing: error)
@@ -132,6 +135,14 @@ import LocalMusicCore
             for cover in covers { try? FileManager.default.removeItem(at: store.coversDirectory.appending(path: cover)) }
         }
         await reloadAfterWrites()
+    }
+
+    func embeddedLyrics(_ trackID: Int64) async -> String? {
+        (try? await store.embeddedLyrics(trackID: trackID)) ?? nil
+    }
+
+    func enrichedLyrics(_ fingerprint: String) async -> (text: String, manual: Bool)? {
+        (try? await store.enrichedLyrics(fingerprint)) ?? nil
     }
 
     func userEdits(_ fingerprint: String) async -> [EnrichField: String] {
@@ -255,6 +266,7 @@ import LocalMusicCore
         let index = await Task.detached { LibraryIndex(rows: rows) }.value
         guard generation == reloads else { return }
         self.index = index
+        backedUp = (try? await store.tagBackupPaths()) ?? []
         // The store dropped removed tracks' likes and playlist entries itself.
         liked = liked.filter { index.tracks[$0.key] != nil }
         for i in playlists.indices { playlists[i].trackIDs.removeAll { index.tracks[$0] == nil } }

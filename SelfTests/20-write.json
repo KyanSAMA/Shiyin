@@ -1,0 +1,181 @@
+{
+  "timeout": 90,
+  "window": {
+    "width": 1440,
+    "height": 900
+  },
+  "relaunch": "relaunch/20-write.json",
+  "steps": [
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/library",
+      "to": "@out/lib"
+    },
+    {
+      "do": "startLibrary",
+      "include": [
+        "@out/lib"
+      ],
+      "exclude": [
+        "@out/lib/Music"
+      ]
+    },
+    {
+      "do": "enrich",
+      "titles": [
+        "群青"
+      ]
+    },
+    {
+      "do": "editInfo",
+      "titles": [
+        "群青"
+      ],
+      "fields": {
+        "album": "写入专辑"
+      }
+    },
+    {
+      "do": "play",
+      "title": "群青"
+    },
+    {
+      "do": "writeTags",
+      "titles": [
+        "群青",
+        "春日影",
+        "无标签标题"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.items.群青.changes",
+      "contains": "album"
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.items.群青.changes",
+      "contains": "lyrics"
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.items.春日影.skip",
+      "equals": "暂不支持写入 M4A 文件"
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.items.无标签标题.skip",
+      "equals": "文件里的信息已经和显示的一致"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.8
+    },
+    {
+      "do": "snapshot",
+      "name": "write-plan",
+      "window": "sheet"
+    },
+    {
+      "do": "writeTags"
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.finished",
+      "equals": true
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.failures",
+      "equals": []
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "write-done",
+      "window": "sheet"
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "readFile",
+      "title": "群青",
+      "as": "written"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.written.ALBUM",
+      "equals": "写入专辑"
+    },
+    {
+      "do": "assert",
+      "path": "fileTags.written.hasCover",
+      "equals": true
+    },
+    {
+      "do": "assert",
+      "path": "library.backedUp",
+      "equals": [
+        "02 群青.flac"
+      ]
+    },
+    {
+      "do": "inspect",
+      "title": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.album",
+      "equals": "写入专辑"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.hasLyrics",
+      "equals": true
+    },
+    {
+      "do": "editInfo",
+      "titles": [
+        "群青"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "editor.edited",
+      "equals": []
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "assert",
+      "path": "player.skipNotice",
+      "equals": null
+    },
+    {
+      "do": "writeTags",
+      "titles": [
+        "群青"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "tagPlan.items.群青.skip",
+      "equals": "文件里的信息已经和显示的一致"
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "quit"
+    }
+  ]
+}

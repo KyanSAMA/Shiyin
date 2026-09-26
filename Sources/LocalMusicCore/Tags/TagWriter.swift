@@ -13,23 +13,40 @@ public enum TagWriter {
         public let version: FileVersion
     }
 
-    public static func write(_ edit: TagEdit, to url: URL, backup: (Original) throws -> Void) async throws -> FileVersion {
+    /// A write worked out but not yet made: its `original` goes to the backup before `commit`.
+    public struct Prepared: Sendable {
+        public let url: URL
+        public let original: Original
+        fileprivate let start: Int64, length: Int64, bytes: Data, fingerprint: String, edit: TagEdit
+    }
+
+    public static func prepare(_ edit: TagEdit, for url: URL) throws -> Prepared {
         let url = url.resolvingSymlinksInPath()
         try TagRegion.checkWritable(url)
         let version = try FileVersion(url)
         var file = try TagFile(url)
         let source = try FileSource(url: url)
-        let audio = try file.audio(source)
         let original = Original(format: file.format, region: try source.read(at: file.start, count: Int(file.length)),
-                                audioSHA256: try TagRegion.sha256(url, audio), version: version)
+                                audioSHA256: try TagRegion.sha256(url, try file.audio(source)), version: version)
         let fingerprint = try AudioFingerprint.compute(source, format: file.format)
         try file.apply(edit)
-        let bytes = file.serialized()
-        try backup(original)
-        return try await TagRegion.commit(url, start: file.start, length: file.length, bytes: bytes, expecting: version) { temp in
-            try await verify(temp, like: original, fingerprint: fingerprint)
-            try await verify(temp, reads: edit, format: file.format)
+        return Prepared(url: url, original: original, start: file.start, length: file.length, bytes: file.serialized(),
+                        fingerprint: fingerprint, edit: edit)
+    }
+
+    /// Fails with `TagWriteError.changed` if the file changed since `prepare`.
+    public static func commit(_ prepared: Prepared) async throws -> FileVersion {
+        try await TagRegion.commit(prepared.url, start: prepared.start, length: prepared.length, bytes: prepared.bytes,
+                                   expecting: prepared.original.version) { temp in
+            try await verify(temp, like: prepared.original, fingerprint: prepared.fingerprint)
+            try await verify(temp, reads: prepared.edit, format: prepared.original.format)
         }
+    }
+
+    public static func write(_ edit: TagEdit, to url: URL, backup: (Original) throws -> Void) async throws -> FileVersion {
+        let prepared = try prepare(edit, for: url)
+        try backup(prepared.original)
+        return try await commit(prepared)
     }
 
     /// Puts the original tag region back (the audio must be the backed-up one).

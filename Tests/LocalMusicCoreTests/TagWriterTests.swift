@@ -205,3 +205,67 @@ struct TagWriterTests {
         await #expect(throws: TagWriteError.self) { _ = try await TagWriter.write(edit, to: wav) { _ in } }
     }
 }
+
+struct TagBackupTests {
+    @Test func keepsTheTrueOriginalAndSortsOutInterruptedWrites() async throws {
+        let lib = try TempLibrary()
+        let url = try lib.flac("One.flac", ["TITLE=One"])
+        _ = try await lib.scan()
+        let store = lib.store, path = try #require(try await lib.store.rows().first).path   // as the scanner spells it
+        func original(_ byte: UInt8) throws -> TagWriter.Original {
+            TagWriter.Original(format: "flac", region: Data([byte]), audioSHA256: "sha", version: try FileVersion(url))
+        }
+        let first = try await store.beginTagWrite(path: path, original: try original(1))
+        #expect(!first.existed)
+        try await store.finishTagWrite(id: first.id, written: FileVersion(size: 1, mtime: 1), moved: [.album: "A"])
+        // A second write keeps the first original and adds what it moved.
+        let second = try await store.beginTagWrite(path: path, original: try original(2))
+        #expect(second.existed && second.id == first.id)
+        try await store.finishTagWrite(id: second.id, written: FileVersion(size: 2, mtime: 2), moved: [.year: "2020"])
+        var backup = try #require(try await store.tagBackup(path: path))
+        #expect(backup.original.region == Data([1]) && backup.moved == [.album: "A", .year: "2020"])
+        #expect(try await store.tagBackupPaths() == [path])
+
+        // A failed later write leaves it as it was; a failed first write leaves nothing.
+        _ = try await store.beginTagWrite(path: path, original: try original(3))
+        try await store.abandonTagWrite(id: first.id, existed: true)
+        #expect(try await store.tagBackupPaths() == [path])
+        try await store.removeTagBackup(id: first.id)
+        let fresh = try await store.beginTagWrite(path: path, original: try original(4))
+        try await store.abandonTagWrite(id: fresh.id, existed: false)
+        #expect(try await store.tagBackup(path: path) == nil)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: store.tagBackupsDirectory.path).isEmpty)
+
+        // Interrupted: the file still as backed up → no backup; replaced → written. Leftover temp files go.
+        _ = try await store.beginTagWrite(path: path, original: try original(5))
+        let temp = TagRegion.temporary(for: url)
+        try Data([0]).write(to: temp)
+        try await store.recoverTagWrites()
+        #expect(try await store.tagBackup(path: path) == nil && !FileManager.default.fileExists(atPath: temp.path))
+        _ = try await store.beginTagWrite(path: path, original: TagWriter.Original(format: "flac", region: Data([6]), audioSHA256: "sha",
+                                                                                version: FileVersion(size: 0, mtime: 0)))
+        try await store.recoverTagWrites()
+        backup = try #require(try await store.tagBackup(path: path))
+        let paths = try await store.tagBackupPaths()
+        #expect(backup.original.region == Data([6]) && paths == [path])
+
+        // Another recording at the path: its own tags are backed up instead.
+        let other = TagWriter.Original(format: "flac", region: Data([7]), audioSHA256: "other", version: try FileVersion(url))
+        #expect(try await !store.beginTagWrite(path: path, original: other).existed)
+        #expect(try await store.tagBackup(path: path)?.original.region == Data([7]))
+
+        // Unreachable (a drive not mounted): kept once something was written to it.
+        let id = try #require(try await store.tagBackup(path: path)).id
+        try await store.finishTagWrite(id: id, written: FileVersion(size: 9, mtime: 9), moved: [:])
+        _ = try await store.beginTagWrite(path: path, original: other)
+        try FileManager.default.moveItem(at: url, to: url.deletingLastPathComponent().appending(path: "Two.flac"))
+        try await store.recoverTagWrites()
+        #expect(try await store.tagBackup(path: path) != nil)
+
+        // Renamed: the backup follows the track.
+        _ = try await lib.scan()
+        #expect(try await store.tagBackup(path: path) == nil)
+        #expect(try await store.tagBackup(path: try #require(try await lib.store.rows().first).path) != nil)
+    }
+}
+

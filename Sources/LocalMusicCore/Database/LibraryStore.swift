@@ -101,6 +101,10 @@ public actor LibraryStore {
         // Known rows update by id (also rewriting `path`, so an NFD→NFC rename never duplicates); `added_at` is kept.
         let id: Int64
         if let storedID = track.storedID {
+            // A tag backup follows its file when it's renamed or moved.
+            if let old = try db.query("SELECT path FROM track WHERE id = ?", [storedID], { $0.string(0)! }).first, old != stamp.path {
+                try db.run("UPDATE tag_backup SET path = ? WHERE path = ?", [stamp.path, old])
+            }
             let updates = values.filter { $0.0 != "added_at" }
             try db.run("UPDATE track SET \(updates.map { "\($0.0) = ?" }.joined(separator: ", ")) WHERE id = ?",
                        updates.map(\.1) + [storedID])
@@ -348,7 +352,7 @@ public actor LibraryStore {
     }
 
     /// The order online layers show in.
-    private func onlineOrder() -> [OnlineSource] {
+    func onlineOrder() -> [OnlineSource] {
         ((try? setting(OnlineSettings.key, as: OnlineSettings.self)) ?? .default).ordered
     }
 

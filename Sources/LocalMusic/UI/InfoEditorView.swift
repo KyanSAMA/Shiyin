@@ -38,6 +38,15 @@ struct InfoEditorView: View {
                 Spacer()
                 Button("取消", role: .cancel) { model.ui.sheet = nil }
                     .keyboardShortcut(.cancelAction)
+                if let row = single {
+                    Button("保存并写入文件…") {
+                        Task {
+                            await model.saveInfo(editor)
+                            if let saved = model.library?.index.tracks[row.id] { await model.planTagWrite([saved]) }
+                        }
+                    }
+                    .disabled(!editor.isValid)
+                }
                 Button("保存") { Task { await model.saveInfo(editor) } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!editor.isValid)
