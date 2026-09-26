@@ -225,6 +225,25 @@ struct OnlineTests {
         #expect(shown.title == "Toon" && shown.year == 2020 && shown.genre == "Pop" && shown.hasLyrics && shown.coverFile != nil)
     }
 
+    @Test func aPickReplacesWhatTheFileHasWhenAsked() async throws {
+        let lib = try TempLibrary()
+        try lib.flac("Tone.flac", ["TITLE=Tone", "ARTIST=Tester", "ALBUM=Wrong", "DATE=1999"])
+        _ = try await lib.scan()
+        let row = try #require(try await lib.store.rows().first)
+        let job = EnrichJob(fingerprint: row.fingerprint!, trackID: row.id,
+                            query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),
+                            songID: nil, needsLyrics: true, needsCover: true, sources: [.qq], storefront: "jp")
+        let service = EnrichService(store: lib.store, client: try client(), interval: .zero)
+        let pick = try #require(try await client().search(.qq, "Tone Tester").first)
+
+        _ = try await service.apply(pick, to: job, candidates: [pick], overrides: PickOverrides(fields: [.album, .cover], lyrics: "[00:01.00]mine"))
+        let shown = try #require(try await lib.store.rows().first)
+        #expect(shown.album == "Tones" && shown.year == 1999 && shown.userCover)   // the year wasn't replaced
+        let edits = try await lib.store.enrichment(job.fingerprint, source: .user)
+        #expect(edits[.album] == "Tones" && edits[.lyrics] == "[00:01.00]mine" && edits[.cover] != nil)
+        #expect(try await lib.store.enrichment(job.fingerprint, source: .online(.qq))[.cover] != nil)   // the layer fills as usual
+    }
+
     @Test func decodesThe163Key() throws {
         let json = #"music:{"musicId":418602075,"musicName":"シャンランラン"}"#
         var out = Data(count: json.utf8.count + 32)

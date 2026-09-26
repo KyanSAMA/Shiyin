@@ -206,12 +206,20 @@ final class SelfTestRunner {
             model.enrich?.startSearch(picker)
             await picker.search?.value
             try await settle()
+        case "selectMatch":
+            // Selects the result with `key` and ticks `replace`, without adopting.
+            let picker = try openPicker()
+            picker.selection = try step.required("key")
+            if let names = step["replace"] as? [String] { picker.replace = Set(names.compactMap(EnrichField.init(rawValue:))) }
+            try await settle()
         case "adoptMatch":
-            // The result at `index` or with `key`, as 采用; waits until it's applied.
+            // The result at `index` or with `key`, as 采用 with `replace` (EnrichField names) ticked; waits until it's applied.
             let picker = try openPicker()
             let song = step.string("key").flatMap { key in picker.results.first { $0.key == key } }
                 ?? step.number("index").flatMap { picker.results.indices.contains(Int($0)) ? picker.results[Int($0)] : nil }
             guard let song, let enrich = model.enrich else { throw SelfTestFailure(description: "no such result") }
+            picker.selection = song.key
+            picker.replace = Set((step["replace"] as? [String] ?? []).compactMap(EnrichField.init(rawValue:)))
             model.ui.sheet = nil
             await enrich.choose(song, for: picker)
             try await settle()
@@ -456,7 +464,7 @@ final class SelfTestRunner {
 
     private func pickerState(_ picker: MatchPicker) -> Step {
         ["keywords": picker.keywords, "searching": picker.searching, "stored": picker.status.isEmpty,
-         "results": picker.results.map(\.key), "selected": picker.selection ?? NSNull(),
+         "results": picker.results.map(\.key), "selected": picker.selection ?? NSNull(), "replace": picker.replace.map(\.rawValue).sorted(),
          "status": Dictionary(uniqueKeysWithValues: picker.status.map { source, status in
              (source.rawValue, { () -> Any in
                  switch status {

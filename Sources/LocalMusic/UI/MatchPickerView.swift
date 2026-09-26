@@ -179,6 +179,14 @@ private struct MatchDetail: View {
     var body: some View {
         let base = picker.baseline
         let lyrics = picker.lyrics[song.key].flatMap(LRCParser.parse)
+        // A value only from the file name is replaced anyway; one the file has differently only when ticked.
+        let rows = Self.fields.compactMap { field in
+            picker.value(field, of: song).map { (field: field, value: $0, current: base.inferred.contains(field) ? "" : base.shown(field),
+                                                 inferred: base.inferred.contains(field) ? base.shown(field) : nil) }
+        }
+        let ownCover = base.hasArtwork || ArtworkCache.hasFolderImage(near: base)
+        let replaceable = rows.filter { !$0.current.isEmpty && $0.current != $0.value }.map(\.field)
+            + (ownCover && song.coverURL != nil ? [.cover] : []) + (base.hasLyrics && lyrics != nil ? [.lyrics] : [])
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
@@ -188,51 +196,88 @@ private struct MatchDetail: View {
                         Text(song.title).font(.headline).lineLimit(2)
                         Text(song.source.title).foregroundStyle(.secondary)
                         DurationDelta(song: song, duration: picker.row.duration)
+                        if !replaceable.isEmpty {
+                            let all = Set(replaceable)
+                            Button(picker.replace == all ? "全部保留现有的" : "全部替换") {
+                                picker.touched = true
+                                picker.replace = picker.replace == all ? [] : all
+                            }
+                                .controlSize(.small)
+                                .padding(.top, 4)
+                        }
                     }
-                }
-                // A value only from the file name is replaced.
-                let rows = Self.fields.compactMap { field in
-                    picker.value(field, of: song).map { (field: field, value: $0, current: base.shown(field), inferred: base.inferred.contains(field)) }
                 }
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
                     ForEach(rows, id: \.field) { row in
+                        let replacing = picker.replace.contains(row.field)
                         GridRow {
-                            mark(row.inferred || row.current.isEmpty ? .fills : row.current == row.value ? .same : .kept)
+                            mark(row.current.isEmpty ? .fills : row.current == row.value ? .same : replacing ? .replaces : .kept)
                             Text(row.field.label).foregroundStyle(.secondary)
-                            Text(row.current.isEmpty || row.current == row.value ? row.value
-                                 : row.inferred ? "\(row.value)（替换文件名里的 \(row.current)）" : "\(row.value)（保留现有的 \(row.current)）")
-                                .lineLimit(2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.inferred.map { "\(row.value)（替换文件名里的 \($0)）" }
+                                     ?? (row.current.isEmpty || row.current == row.value ? row.value
+                                         : "\(row.value)（\(replacing ? "替换" : "保留")现有的 \(row.current)）"))
+                                    .lineLimit(2)
+                                if !row.current.isEmpty, row.current != row.value, Self.folded(row.current) == Self.folded(row.value) {
+                                    Text("仅繁简 / 大小写 / 全半角不同").font(.system(size: 11)).foregroundStyle(.secondary)
+                                }
+                            }
+                            replaceToggle(row.field, shown: replaceable.contains(row.field))
                         }
                     }
                     if song.coverURL != nil {
                         GridRow {
-                            mark(base.hasArtwork || ArtworkCache.hasFolderImage(near: base) ? .kept : .fills)
+                            mark(!ownCover ? .fills : picker.replace.contains(.cover) ? .replaces : .kept)
                             Text("封面").foregroundStyle(.secondary)
-                            Text(base.hasArtwork || ArtworkCache.hasFolderImage(near: base) ? "保留现有的封面" : "补上")
+                            Text(!ownCover ? "补上" : picker.replace.contains(.cover) ? "替换现有的封面" : "保留现有的封面")
+                            replaceToggle(.cover, shown: replaceable.contains(.cover))
                         }
                     }
                     GridRow {
-                        mark(base.hasLyrics ? .kept : lyrics == nil ? .none : .fills)
+                        mark(base.hasLyrics ? (picker.replace.contains(.lyrics) ? .replaces : .kept) : lyrics == nil ? .none : .fills)
                         Text("歌词").foregroundStyle(.secondary)
-                        Text(base.hasLyrics ? "保留现有的歌词" : picker.lyrics[song.key] == nil ? "载入中…" : lyrics.map(summary) ?? "没有歌词，采用后再从其他来源找")
+                        Text(picker.lyrics[song.key] == nil ? "载入中…"
+                             : !base.hasLyrics ? lyrics.map { "补上" + summary($0) } ?? "没有歌词，采用后再从其他来源找"
+                             : picker.replace.contains(.lyrics) ? lyrics.map { "替换为" + summary($0) } ?? ""
+                             : "保留现有的歌词" + (lyrics.map { "（这首有" + summary($0) + "）" } ?? ""))
+                        replaceToggle(.lyrics, shown: replaceable.contains(.lyrics))
                     }
                 }
-                Text(picker.row.fingerprint.flatMap { enrich.matches[$0] }.map { $0.status == .auto || $0.status == .confirmed } == true
-                     ? "采用后替换现有的补全，并用这首的资料再查其他来源。只补空缺，不改动文件里已有的信息。"
-                     : "采用后还会用这首的资料再查其他来源。只补空缺，不改动文件里已有的信息。")
+                Text((picker.row.fingerprint.flatMap { enrich.matches[$0] }.map { $0.status == .auto || $0.status == .confirmed } == true
+                      ? "采用后替换现有的补全，并用这首的资料再查其他来源。" : "采用后还会用这首的资料再查其他来源。")
+                     + "空缺自动补上；勾选「替换」的项存为手动修改，优先于文件里的信息，可在「编辑信息」里还原。不改动音频文件。")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             .padding(20)
         }
     }
 
-    private enum Mark { case fills, same, kept, none }
+    @ViewBuilder private func replaceToggle(_ field: EnrichField, shown: Bool) -> some View {
+        if shown {
+            Toggle("替换", isOn: Binding(get: { picker.replace.contains(field) }, set: { on in
+                // Later sources no longer re-rank the list (which would move the selection and clear this).
+                picker.touched = true
+                if on { picker.replace.insert(field) } else { picker.replace.remove(field) }
+            }))
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+        } else {
+            Color.clear.frame(width: 1, height: 1)
+        }
+    }
+
+    private static func folded(_ text: String) -> String {
+        (text.applyingTransform(StringTransform("Hant-Hans"), reverse: false) ?? text).folding(options: [.caseInsensitive, .widthInsensitive], locale: nil)
+    }
+
+    private enum Mark { case fills, same, kept, replaces, none }
 
     private func mark(_ mark: Mark) -> some View {
         let (symbol, color): (String, Color) = switch mark {
         case .fills: ("plus.circle.fill", .green)
         case .same: ("equal.circle", .secondary)
         case .kept: ("minus.circle", .secondary)
+        case .replaces: ("arrow.triangle.2.circlepath.circle.fill", .orange)
         case .none: ("circle.dashed", .secondary)
         }
         return Image(systemName: symbol).foregroundStyle(color)
@@ -241,8 +286,8 @@ private struct MatchDetail: View {
     private func summary(_ lyrics: Lyrics) -> String {
         switch lyrics {
         case .synced(let lines):
-            "补上 \(lines.filter { !$0.isCredit && !$0.text.isEmpty }.count) 行" + (lines.contains { $0.translation != nil } ? "，含翻译" : "")
-        case .unsynced(let lines): "补上 \(lines.count) 行（无时间轴）"
+            " \(lines.filter { !$0.isCredit && !$0.text.isEmpty }.count) 行" + (lines.contains { $0.translation != nil } ? "，含翻译" : "")
+        case .unsynced(let lines): " \(lines.count) 行（无时间轴）"
         }
     }
 }

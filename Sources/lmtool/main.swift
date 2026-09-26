@@ -178,7 +178,8 @@ func online(_ arguments: [String]) async throws {
         let query = MatchQuery(title: meta.title, artists: meta.names(.artist), album: meta.album, duration: raw.properties.duration)
         var results: [String: Any] = ["keywords": query.keywords, "ncmKey": value(meta.ncmKey.flatMap(NCMKey.songID))]
         for source in OnlineSource.allCases {
-            results[source.rawValue] = switch Matcher.match(query, candidates: try await client.search(source, query.keywords)) {
+            let songs = try await client.search(source, query.keywords)
+            results[source.rawValue] = switch Matcher.match(query, candidates: songs) {
             case .confident(let song, let score): ["confident": describe(song), "score": score] as [String: Any]
             case .uncertain(let songs): ["uncertain": songs.map(describe)]
             case .none: "none"

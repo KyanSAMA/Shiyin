@@ -3,7 +3,7 @@ import Observation
 import LocalMusicCore
 
 /// The 选择匹配 sheet for one song: which online song it is, from the stored candidates or a search of the enabled
-/// sources. The pick becomes the song's match (filling only gaps); nothing here is a manual edit.
+/// sources. The pick becomes the song's match, filling gaps; what `replace` names becomes manual edits over the file.
 @Observable final class MatchPicker {
     enum SourceStatus: Equatable {
         case searching, found(Int), failed(String)
@@ -16,8 +16,12 @@ import LocalMusicCore
     let sources: [OnlineSource]
     var keywords: String
     fileprivate(set) var results: [OnlineSong]
-    /// The selected result's key.
-    var selection: String?
+    /// The selected result's key; choosing another clears `replace`.
+    var selection: String? {
+        didSet { if selection != oldValue { replace = [] } }
+    }
+    /// What the pick replaces in the file (as manual edits) rather than only filling gaps.
+    var replace: Set<EnrichField> = []
     /// The last search's per source; empty while showing the stored candidates.
     fileprivate(set) var status: [OnlineSource: SourceStatus] = [:]
     /// Once the user has picked a row, results arriving later go to the end instead of re-ranking under the cursor.
@@ -137,7 +141,10 @@ extension EnrichModel {
         guard let job = job(picker.row, songID: nil) else { return }
         dequeue(job.fingerprint)
         applying.insert(job.fingerprint)
-        do { _ = try await service.apply(song, to: job, candidates: picker.results) } catch { notice = "补全失败：\(error)" }
+        let replace = picker.selection == song.key ? picker.replace : []
+        // Lyrics already loaded for the preview aren't fetched again.
+        let overrides = PickOverrides(fields: replace, lyrics: replace.contains(.lyrics) ? picker.lyrics[song.key].flatMap { $0.isEmpty ? nil : $0 } : nil)
+        do { _ = try await service.apply(song, to: job, candidates: picker.results, overrides: overrides) } catch { notice = "补全失败：\(error)" }
         await reloadMatch(job.fingerprint)
         await library.refresh()
         applying.remove(job.fingerprint)

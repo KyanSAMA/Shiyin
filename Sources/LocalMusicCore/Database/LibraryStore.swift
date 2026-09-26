@@ -308,10 +308,10 @@ public actor LibraryStore {
                    [fingerprint, status.rawValue, json, Date().timeIntervalSince1970])
     }
 
-    /// Replaces these sources' layers (others stay) and records the match, in one transaction; returns the cover files
-    /// the replaced layers referenced and the new ones don't.
+    /// Replaces these sources' layers (others stay), sets the `user` edits and records the match, in one transaction;
+    /// returns the cover files the replaced layers and edits referenced and the new ones don't.
     public func applyMatch(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus,
-                           candidates: [OnlineSong] = []) throws -> [String] {
+                           candidates: [OnlineSong] = [], user: [EnrichField: String] = [:]) throws -> [String] {
         try db.transaction {
             var covers: [String] = []
             for (source, values) in layers {
@@ -319,6 +319,8 @@ public actor LibraryStore {
                 try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, source.rawValue])
                 try setEnrichmentRows([fingerprint], values, source: .online(source))
             }
+            if let new = user[.cover], let old = try enrichment(fingerprint, source: .user)[.cover], old != new { covers.append(old) }
+            try setEnrichmentRows([fingerprint], user, source: .user)
             try setMatch(fingerprint, status, candidates: candidates)
             return covers
         }

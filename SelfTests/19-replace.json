@@ -1,0 +1,33 @@
+{
+  "timeout": 60,
+  "window": { "width": 1440, "height": 900 },
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "chooseMatch", "title": "群青" },
+    { "do": "assert", "path": "picker.results", "contains": "netease:1472480890" },
+    { "do": "selectMatch", "key": "netease:1472480890", "replace": ["album", "year", "cover"] },
+    { "do": "assert", "path": "picker.replace", "equals": ["album", "cover", "year"] },
+    { "do": "wait", "seconds": 1 },
+    { "do": "snapshot", "name": "replace", "window": "sheet" },
+    { "do": "selectMatch", "key": "netease:1500151581" },
+    { "do": "assert", "path": "picker.replace", "equals": [] },
+    { "do": "adoptMatch", "key": "netease:1472480890", "replace": ["album", "year", "cover"] },
+    { "do": "inspect", "title": "群青" },
+    { "do": "assert", "path": "inspected.群青.match", "equals": "confirmed" },
+    { "do": "assert", "path": "inspected.群青.album", "equals": "群青" },
+    { "do": "assert", "path": "inspected.群青.year", "equals": 2020 },
+    { "do": "assert", "path": "inspected.群青.trackNo", "equals": 2 },
+    { "do": "assert", "path": "inspected.群青.userCover", "equals": true },
+    { "do": "editInfo", "titles": ["群青"], "keepOpen": true },
+    { "do": "assert", "path": "editor.texts.album", "equals": "群青" },
+    { "do": "assert", "path": "editor.texts.year", "equals": "2020" },
+    { "do": "closeEditInfo" },
+    { "do": "revertInfo", "titles": ["群青"] },
+    { "do": "inspect", "title": "群青" },
+    { "do": "assert", "path": "inspected.群青.album", "equals": "THE BOOK" },
+    { "do": "assert", "path": "inspected.群青.year", "equals": 2021 },
+    { "do": "assert", "path": "inspected.群青.userCover", "equals": false },
+    { "do": "quit" }
+  ]
+}

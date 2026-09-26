@@ -77,6 +77,15 @@ public enum MatchStatus: String, Sendable, Codable {
     case rejected
 }
 
+/// What a pick replaces in the file, stored as manual edits: these fields from the picked song, lyrics possibly chosen
+/// from elsewhere.
+public struct PickOverrides: Sendable {
+    public var fields: Set<EnrichField>
+    public var lyrics: String?
+
+    public init(fields: Set<EnrichField> = [], lyrics: String? = nil) { (self.fields, self.lyrics) = (fields, lyrics) }
+}
+
 public struct MatchState: Sendable, Equatable {
     public let status: MatchStatus
     /// For `pending`: best first.

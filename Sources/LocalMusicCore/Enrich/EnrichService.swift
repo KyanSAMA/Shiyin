@@ -141,15 +141,33 @@ public actor EnrichService {
     }
 
     /// The user's pick becomes the song's match, replacing every online layer; the other sources are asked with the
-    /// pick's title, artists and album, keeping only confident matches. `candidates` stay for picking again.
-    public func apply(_ song: OnlineSong, to job: EnrichJob, candidates: [OnlineSong]) async throws -> [OnlineSong] {
+    /// pick's title, artists and album, keeping only confident matches. What `overrides` names replaces the file's values
+    /// as manual edits instead of filling gaps. `candidates` stay for picking again.
+    public func apply(_ song: OnlineSong, to job: EnrichJob, candidates: [OnlineSong], overrides: PickOverrides = .init()) async throws -> [OnlineSong] {
         try await serial {
-            var gaps = try await self.gaps(job), found = Found()
-            try await self.take(song, job, &found, gaps: &gaps)
-            await self.search(job, job.query.pinned(song), &found, gaps: &gaps)
-            try await self.save(job.fingerprint, found.layers, .confirmed, candidates: candidates)
-            return found.applied
+            // Replacements first: if they fail, nothing has been downloaded for the layers yet.
+            let user = try await self.replacing(song, job, overrides)
+            do {
+                var gaps = try await self.gaps(job), found = Found()
+                try await self.take(song, job, &found, gaps: &gaps)
+                await self.search(job, job.query.pinned(song), &found, gaps: &gaps)
+                try await self.save(job.fingerprint, found.layers, .confirmed, candidates: candidates, user: user)
+                return found.applied
+            } catch {
+                if let cover = user[.cover] { try? FileManager.default.removeItem(at: self.store.coversDirectory.appending(path: cover)) }
+                throw error
+            }
         }
+    }
+
+    /// The pick's values for the replaced fields, whatever the file has (a cover downloaded in full, lyrics fetched
+    /// unless chosen elsewhere).
+    private func replacing(_ song: OnlineSong, _ job: EnrichJob, _ overrides: PickOverrides) async throws -> [EnrichField: String] {
+        var wanted = overrides.fields
+        if overrides.lyrics != nil { wanted.remove(.lyrics) }
+        var values = try await values(song, job, gaps: &wanted).filter { overrides.fields.contains($0.key) }
+        values[.lyrics] = overrides.lyrics ?? values[.lyrics]
+        return values
     }
 
     private struct Found {
@@ -223,16 +241,18 @@ public actor EnrichService {
         return values
     }
 
-    /// Replaces every online layer with these, removing the cover files no longer referenced (or the new ones if saving
+    /// Replaces every online layer with these (and sets `user` edits), removing the cover files no longer referenced (or the new ones if saving
     /// fails).
     private func save(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus,
-                      candidates: [OnlineSong] = []) async throws {
+                      candidates: [OnlineSong] = [], user: [EnrichField: String] = [:]) async throws {
         let covers = store.coversDirectory
         let all = Dictionary(uniqueKeysWithValues: OnlineSource.allCases.map { ($0, layers[$0] ?? [:]) })
         do {
-            for name in try await store.applyMatch(fingerprint, all, status, candidates: candidates) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
+            for name in try await store.applyMatch(fingerprint, all, status, candidates: candidates, user: user) {
+                try? FileManager.default.removeItem(at: covers.appending(path: name))
+            }
         } catch {
-            for name in layers.values.compactMap({ $0[.cover] }) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
+            for name in (Array(layers.values) + [user]).compactMap({ $0[.cover] }) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
             throw error
         }
     }

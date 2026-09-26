@@ -124,10 +124,10 @@ extension AppModel {
             ui.sheet = .editor(InfoEditor(tracks: rows, edits: [:], unedited: []))
             return
         }
-        let layers = await library.layers(first)
+        let layers = await library.layers(first), edits = await library.userEdits(first)
+        let unedited = await library.rows([rows[0].id], without: [.user])
         let order = enrich?.settings.ordered ?? OnlineSource.allCases
-        ui.sheet = .editor(InfoEditor(tracks: rows, edits: await library.userEdits(first), unedited: await library.rows([rows[0].id], without: [.user]),
-                                      layers: order.compactMap { source in layers[source].map { (source, $0) } }))
+        ui.sheet = .editor(InfoEditor(tracks: rows, edits: edits, unedited: unedited, layers: order.compactMap { source in layers[source].map { (source, $0) } }))
     }
 
     /// A chosen cover is copied into the covers directory first.
