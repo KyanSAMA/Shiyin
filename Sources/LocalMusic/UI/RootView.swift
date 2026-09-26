@@ -58,11 +58,11 @@ struct RootView: View {
             Button("取消", role: .cancel) {}
             Button(prompt.action) { model.commitPlaylistPrompt(prompt) }.keyboardShortcut(.defaultAction)
         }
-        .sheet(isPresented: Binding(get: { ui.infoEditor != nil }, set: { if !$0 { ui.infoEditor = nil } })) {
-            if let editor = ui.infoEditor { InfoEditorView(model: model, editor: editor) }
-        }
-        .sheet(isPresented: Binding(get: { ui.compare != nil }, set: { if !$0 { ui.compare = nil } })) {
-            if let compare = ui.compare, let enrich = model.enrich { SourceCompareView(model: model, enrich: enrich, compare: compare) }
+        .sheet(item: $ui.sheet) { sheet in
+            switch sheet {
+            case .editor(let editor): InfoEditorView(model: model, editor: editor)
+            case .picker(let picker): if let enrich = model.enrich { MatchPickerView(model: model, enrich: enrich, picker: picker) }
+            }
         }
         .confirmationDialog(ui.deletingPlaylist.flatMap { model.library?.playlist($0) }.map { "删除播放列表「\($0.name)」？" } ?? "",
                             isPresented: Binding(get: { ui.deletingPlaylist != nil }, set: { if !$0 { ui.deletingPlaylist = nil } }),

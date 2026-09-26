@@ -11,8 +11,10 @@ import LocalMusicCore
     private(set) var progress: (done: Int, total: Int)?
     /// The last run's problem, or a note such as nothing being left to do.
     var notice: String?
-    /// Result covers for the 资料对照 sheet, fetched while it's open.
+    /// Result covers for the 选择匹配 sheet, fetched while it's open.
     private(set) var thumbnails: [URL: NSImage] = [:]
+    /// Songs whose pick is being applied.
+    var applying = Set<String>()
     @ObservationIgnored private var requestedThumbnails = Set<URL>()
 
     @ObservationIgnored let store: LibraryStore
@@ -89,16 +91,18 @@ import LocalMusicCore
         matches[fingerprint] = try? await store.matches(fingerprint)[fingerprint]
     }
 
-    /// Once per cover until the sheet closes, also when it fails.
-    func loadThumbnail(_ song: OnlineSong) async {
-        guard let url = song.coverURL, requestedThumbnails.insert(url).inserted else { return }
-        // A load cancelled by switching results is retried next time.
-        guard let data = try? await service.thumbnail(song), let image = NSImage(data: data) else {
+    /// Once per cover and size until the sheet closes, also when it fails.
+    func loadThumbnail(_ song: OnlineSong, pixels: Int) async {
+        guard let url = OnlineClient.coverURL(song, pixels: pixels), requestedThumbnails.insert(url).inserted else { return }
+        // A load cancelled by scrolling away is retried next time.
+        guard let data = try? await service.thumbnail(song, pixels: pixels), let image = NSImage(data: data) else {
             if Task.isCancelled { requestedThumbnails.remove(url) }
             return
         }
         thumbnails[url] = image
     }
+
+    func thumbnail(_ song: OnlineSong, pixels: Int) -> NSImage? { OnlineClient.coverURL(song, pixels: pixels).flatMap { thumbnails[$0] } }
 
     func clearThumbnails() {
         thumbnails = [:]
@@ -147,7 +151,7 @@ import LocalMusicCore
 
     /// Lyrics and a cover are fetched only when the file itself has none (enrichment's own don't count, so looking a
     /// song up again keeps them).
-    private func job(_ row: TrackRow, songID: Int64?) -> EnrichJob? {
+    func job(_ row: TrackRow, songID: Int64?) -> EnrichJob? {
         row.fingerprint.map {
             EnrichJob(fingerprint: $0, trackID: row.id,
                       query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),

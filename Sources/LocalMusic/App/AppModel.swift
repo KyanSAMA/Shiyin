@@ -103,6 +103,21 @@ enum Route: Hashable {
     case album(String)
 }
 
+/// 编辑信息 or 选择匹配; one slot, so either can hand over to the other.
+enum SongSheet: Identifiable {
+    case editor(InfoEditor), picker(MatchPicker)
+
+    var id: ObjectIdentifier {
+        switch self {
+        case .editor(let editor): ObjectIdentifier(editor)
+        case .picker(let picker): ObjectIdentifier(picker)
+        }
+    }
+
+    var editor: InfoEditor? { if case .editor(let editor) = self { editor } else { nil } }
+    var picker: MatchPicker? { if case .picker(let picker) = self { picker } else { nil } }
+}
+
 @Observable final class UIState {
     var sidebar: SidebarItem = .songs
     var path: [Route] = []
@@ -120,9 +135,7 @@ enum Route: Hashable {
     var playlistPrompt: PlaylistPrompt?
     var playlistName = ""
     var deletingPlaylist: Int64?
-    /// The batch edit sheet; one song gets the 资料对照 sheet (`compare`).
-    var infoEditor: InfoEditor?
-    var compare: SourceCompare?
+    var sheet: SongSheet?
     var enrichFilter = EnrichFilter.missingLyrics
     /// 0 曲库, 1 在线资料.
     var settingsTab = 0

@@ -258,17 +258,19 @@ public actor LibraryStore {
     }
 
     /// A sidecar `.lrc` wins over embedded lyrics, so lyrics can be fixed without touching the audio file.
-    /// The sidecar, else embedded, else enrichment lyrics.
+    /// Manual lyrics, else the sidecar, else embedded, else the online sources' in the user's order.
     public func lyrics(for trackID: Int64) throws -> Lyrics? {
         // An empty or header-only sidecar parses to nil and must not hide embedded lyrics.
         let file = try db.query("SELECT lrc FROM lyrics WHERE track_id = ? ORDER BY source = 'sidecar' DESC", [trackID]) { $0.string(0) }
         let sources = [EnrichSource.user] + onlineOrder().map(EnrichSource.online)
         let rank = sources.enumerated().map { "WHEN '\($0.element.rawValue)' THEN \($0.offset)" }.joined(separator: " ") + " ELSE \(sources.count)"
         let enriched = try db.query("""
-            SELECT e.value FROM enrichment e JOIN track t ON t.fingerprint = e.fingerprint
+            SELECT e.source = 'user', e.value FROM enrichment e JOIN track t ON t.fingerprint = e.fingerprint
             WHERE t.id = ? AND e.field = 'lyrics' ORDER BY CASE e.source \(rank) END
-            """, [trackID]) { $0.string(0) }
-        return (file + enriched).lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
+            """, [trackID]) { ($0.int(0) == 1, $0.string(1)) }
+        // Manual lyrics, the file's, then the online sources'.
+        let ordered = enriched.filter(\.0).map(\.1) + file + enriched.filter { !$0.0 }.map(\.1)
+        return ordered.lazy.compactMap { $0.flatMap(LRCParser.parse) }.first
     }
 
     // MARK: Enrichment
@@ -308,7 +310,8 @@ public actor LibraryStore {
 
     /// Replaces these sources' layers (others stay) and records the match, in one transaction; returns the cover files
     /// the replaced layers referenced and the new ones don't.
-    public func applyMatch(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus) throws -> [String] {
+    public func applyMatch(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus,
+                           candidates: [OnlineSong] = []) throws -> [String] {
         try db.transaction {
             var covers: [String] = []
             for (source, values) in layers {
@@ -316,7 +319,7 @@ public actor LibraryStore {
                 try db.run("DELETE FROM enrichment WHERE fingerprint = ? AND source = ?", [fingerprint, source.rawValue])
                 try setEnrichmentRows([fingerprint], values, source: .online(source))
             }
-            try setMatch(fingerprint, status)
+            try setMatch(fingerprint, status, candidates: candidates)
             return covers
         }
     }
@@ -402,21 +405,23 @@ public actor LibraryStore {
                 if !file.isEmpty { return file }
                 return online(field).map(EnrichField.decode) ?? inferred
             }
-            let title = r.string(2) ?? "", tagged = r.string(21) == ValueSource.tag.rawValue
+            let title = r.string(2) ?? "", tagged = r.string(21) == ValueSource.tag.rawValue, trackTagged = r.string(22) == ValueSource.tag.rawValue
             let credited = people[id]
             return TrackRow(id: id, path: r.string(1)!, title: pick(.title, tagged ? title : nil, inferred: title) ?? "",
                             album: pick(.album, r.string(3)), albumArtist: pick(.albumArtist, r.string(4)),
                             artists: names(.artists, credited?.artists ?? []),
                             composers: names(.composers, credited?.composers ?? [], inferred: credited?.credited ?? []),
-                            trackNo: pick(.trackNo, r.string(22) == ValueSource.tag.rawValue ? r.int(5).map(String.init) : nil,
-                                          inferred: r.int(5).map(String.init)).flatMap { Int($0) },
+                            trackNo: pick(.trackNo, trackTagged ? r.int(5).map(String.init) : nil, inferred: r.int(5).map(String.init)).flatMap { Int($0) },
                             discNo: pick(.discNo, r.int(6).map(String.init)).flatMap { Int($0) },
                             year: pick(.year, r.int(7).map(String.init)).flatMap { Int($0) }, genre: pick(.genre, r.string(8)),
                             duration: r.double(9) ?? 0, format: r.string(10) ?? "", codec: r.string(19), sampleRate: r.int(11),
                             bitDepth: r.int(12), hasCover: r.int(13) == 1, coverOffset: r.int64(17), coverLength: r.int(18),
                             hasLyrics: r.int(14) == 1 || layer[.lyrics] != nil, addedAt: Date(timeIntervalSince1970: r.double(15) ?? 0),
                             fileMtime: r.double(16) ?? 0, fingerprint: fingerprint, hasFileLyrics: r.int(14) == 1,
-                            coverFile: (layer[.cover]?[.user] ?? online(.cover)).map { covers.appending(path: $0).path })
+                            coverFile: (layer[.cover]?[.user] ?? online(.cover)).map { covers.appending(path: $0).path },
+                            userCover: layer[.cover]?[.user] != nil,
+                            inferred: Set([(EnrichField.title, tagged || r.string(2) == nil), (.trackNo, trackTagged || r.int(5) == nil)]
+                                .filter { field, known in !known && layer[field]?[.user] == nil && online(field) == nil }.map(\.0)))
         }
     }
 }

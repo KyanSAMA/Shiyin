@@ -65,8 +65,11 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public var fingerprint: String? = nil
     /// The file's own lyrics (embedded or sidecar), as opposed to enrichment's.
     public var hasFileLyrics = false
-    /// A downloaded or chosen cover, for a file without its own.
+    /// A downloaded cover, for a file without its own, or a chosen one, shown over the file's own (`userCover`).
     public var coverFile: String? = nil
+    public var userCover = false
+    /// Title and track number only from the file name, so any source's replaces them.
+    public var inferred: Set<EnrichField> = []
 
     public var url: URL { URL(filePath: path) }
     public var hasArtwork: Bool { hasCover || coverFile != nil }

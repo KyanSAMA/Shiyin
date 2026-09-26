@@ -204,6 +204,27 @@ struct OnlineTests {
         #expect(await service.enrich(try await job("Broken")) == .notFound)
     }
 
+    @Test func aPickAsksTheOtherSourcesByItsNameAndReplacesEveryLayer() async throws {
+        let lib = try TempLibrary()
+        try lib.flac("Toon.flac", ["TITLE=Toon", "ARTIST=Tester"])
+        _ = try await lib.scan()
+        let row = try #require(try await lib.store.rows().first)
+        let job = EnrichJob(fingerprint: row.fingerprint!, trackID: row.id,
+                            query: MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration),
+                            songID: nil, needsLyrics: true, needsCover: true, sources: OnlineSource.allCases, storefront: "jp")
+        let service = EnrichService(store: lib.store, client: try client(), interval: .zero)
+        #expect(await service.enrich(job) == .notFound)
+        _ = try await lib.store.applyMatch(job.fingerprint, [.netease: [.year: "1999"]], .auto)
+        let pick = try #require(try await client().search(.qq, "Tone Tester").first)
+
+        let applied = try await service.apply(pick, to: job, candidates: [pick])
+        #expect(applied.map(\.source) == [.qq, .itunes, .lrclib])   // searched as "Tone Tester", not "Toon Tester"
+        #expect(try await lib.store.enrichment(job.fingerprint, source: .online(.netease)).isEmpty)
+        #expect(try await lib.store.matches(job.fingerprint)[job.fingerprint] == MatchState(status: .confirmed, candidates: [pick]))
+        let shown = try #require(try await lib.store.rows().first)
+        #expect(shown.title == "Toon" && shown.year == 2020 && shown.genre == "Pop" && shown.hasLyrics && shown.coverFile != nil)
+    }
+
     @Test func decodesThe163Key() throws {
         let json = #"music:{"musicId":418602075,"musicName":"シャンランラン"}"#
         var out = Data(count: json.utf8.count + 32)

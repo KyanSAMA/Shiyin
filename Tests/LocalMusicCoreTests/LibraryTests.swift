@@ -148,9 +148,10 @@ struct LibraryScannerTests {
         try await lib.store.setEnrichment([fingerprint], netease, source: .online(.netease))
         var row = try #require(try await lib.store.rows().first)
         #expect(row.title == "Net" && row.album == "Tagged" && row.year == 2020 && row.artists == ["A"] && row.composers == ["C"])
-        #expect(row.hasLyrics && row.trackNo == 1)
+        #expect(row.hasLyrics && row.trackNo == 1 && row.inferred == [.trackNo])
         try await lib.store.setEnrichment([fingerprint], [.trackNo: "7"], source: .online(.netease))
-        #expect(try await lib.store.rows().first?.trackNo == 7)   // "01 From Name" only inferred it
+        row = try #require(try await lib.store.rows().first)
+        #expect(row.trackNo == 7 && row.inferred.isEmpty)   // "01 From Name" only inferred it
         guard case .synced(let lines)? = try await lib.store.lyrics(for: row.id) else { Issue.record("no enriched lyrics"); return }
         #expect(lines.map(\.text) == ["hi"])
 
@@ -300,6 +301,25 @@ struct LibraryIndexTests {
             row(3, "c", album: "Mixed", albumArtist: "Y", artists: ["Y"]), row(4, "d", album: "Mixed", artists: ["Z"]),
         ])
         #expect(index.albums.map { $0.trackIDs.sorted() } == [[1, 2], [3, 4]])
+    }
+
+    @Test func manualCoversAndLyricsShowOverTheFilesOwn() async throws {
+        let lib = try TempLibrary()
+        try lib.flac("One.flac", ["TITLE=One", "LYRICS=[00:01.00]file"])
+        try Data("jpeg".utf8).write(to: lib.root.appending(path: "cover.jpg"))
+        _ = try await lib.scan()
+        var row = try #require(try await lib.store.rows().first)
+        let fingerprint = try #require(row.fingerprint)
+        func lyrics() async throws -> [String] {
+            guard case .synced(let lines)? = try await lib.store.lyrics(for: row.id) else { return [] }
+            return lines.map(\.text)
+        }
+        try await lib.store.setEnrichment([fingerprint], [.lyrics: "[00:01.00]online", .cover: "online.jpg"], source: .online(.qq))
+        row = try #require(try await lib.store.rows().first)
+        #expect(try await lyrics() == ["file"] && ArtworkCache.source(for: row)?.key.hasPrefix("f") == true)
+        try await lib.store.setEnrichment([fingerprint], [.lyrics: "[00:01.00]mine", .cover: "mine.jpg"], source: .user)
+        row = try #require(try await lib.store.rows().first)
+        #expect(try await lyrics() == ["mine"] && row.userCover && ArtworkCache.source(for: row)?.folderImage?.lastPathComponent == "mine.jpg")
     }
 
     @Test func ordersSameTitledAlbumsDeterministically() {

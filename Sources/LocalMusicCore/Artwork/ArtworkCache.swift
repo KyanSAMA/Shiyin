@@ -3,9 +3,9 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Cover thumbnails: memory LRU (by bytes) over a JPEG disk cache over the source image. The source is the embedded
-/// picture, or else a conventional image in the track's folder, which is keyed by its own path and mtime so a folder
-/// of tracks shares one decode and a replaced `cover.jpg` is picked up. Work runs in the caller's task, so a cover
+/// Cover thumbnails: memory LRU (by bytes) over a JPEG disk cache over the source image. The source is a chosen cover,
+/// else the embedded picture, else a conventional image in the track's folder (keyed by its own path and mtime so a
+/// folder of tracks shares one decode and a replaced `cover.jpg` is picked up), else a downloaded cover. Work runs in the caller's task, so a cover
 /// that scrolled away (cancelled `.task`) is skipped instead of decoded; at most `parallelism` decodes at once.
 public actor ArtworkCache {
     static let folderImageNames = ["cover.jpg", "cover.png", "folder.jpg", "folder.png", "front.jpg", "front.png"]
@@ -52,15 +52,15 @@ public actor ArtworkCache {
         let folderImage: URL?
     }
 
-    /// Embedded art keyed by track and file mtime; folder art by the image's path and mtime; then an enrichment cover
-    /// (a new name for each download).
+    /// A chosen cover first; embedded art keyed by track and file mtime; folder art by the image's path and mtime; then
+    /// a downloaded cover (a new name for each download or choice).
     static func source(for row: TrackRow) -> Source? {
+        let enriched = row.coverFile.map { Source(key: "e" + TagReader.sha256(Data($0.utf8)).prefix(16), track: row, folderImage: URL(filePath: $0)) }
+        if row.userCover { return enriched }
         if row.hasCover { return Source(key: "t\(row.id)-\(Int(row.fileMtime))", track: row, folderImage: nil) }
         guard let url = folderImage(near: row),
               let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        else {
-            return row.coverFile.map { Source(key: "e" + TagReader.sha256(Data($0.utf8)).prefix(16), track: row, folderImage: URL(filePath: $0)) }
-        }
+        else { return enriched }
         return Source(key: "f" + TagReader.sha256(Data(url.path.utf8)).prefix(16) + "-\(Int(mtime.timeIntervalSince1970))",
                       track: row, folderImage: url)
     }

@@ -174,55 +174,53 @@ final class SelfTestRunner {
             model.deletePlaylist(try playlist(step.required("name")).id)
             try await settle()
         case "editInfo":
-            // Through the sheet (资料对照 for one song, after its search): open it, fill `fields` (EnrichField names),
-            // then save unless `keepOpen`.
+            // Through the sheet: open it, fill `fields` (EnrichField names) and, for one song, `suggest` a source's value
+            // for a field (or cover / lyrics); then save unless `keepOpen`.
             let index = try library().index
             await model.editInfo(try trackIDs(step).compactMap { index.tracks[$0] })
-            await model.ui.compare?.search?.value
-            guard let editor = model.ui.compare?.editor ?? model.ui.infoEditor else { throw SelfTestFailure(description: "no editor") }
+            guard let editor = model.ui.sheet?.editor else { throw SelfTestFailure(description: "no editor") }
             for (key, value) in step["fields"] as? [String: String] ?? [:] {
                 guard let field = EnrichField(rawValue: key) else { throw SelfTestFailure(description: "unknown field \(key)") }
                 editor.texts[field] = value
             }
-            if step["keepOpen"] as? Bool != true { try await saveSheet() }
-            try await settle()
-        case "compareSearch":
-            let compare = try openCompare()
-            compare.keywords = try step.required("keywords")
-            model.enrich?.startSearch(compare)
-            await compare.search?.value
-            try await settle()
-        case "pickResult", "adopt":
-            // A source's result by `index`; `adopt` then takes its `field` (an EnrichField name), or all of it.
-            let compare = try openCompare()
-            guard let source = OnlineSource(rawValue: try step.required("source")) else { throw SelfTestFailure(description: "unknown source") }
-            if let index = step.number("index") { compare.picked[source] = Int(index) }
-            guard let song = compare.song(source), let enrich = model.enrich else { throw SelfTestFailure(description: "no result") }
-            await enrich.loadDetails(song, for: compare)
-            await enrich.loadThumbnail(song)
-            if step.string("do") == "adopt" {
-                switch step.string("field") {
-                case nil: compare.adopt(song)
-                case "cover":
-                    compare.cover = .song(song)
-                    compare.tookOnline = true
-                case "lyrics":
-                    compare.lyricsChoice = .song(song)
-                    compare.tookOnline = true
-                case let name?:
-                    guard let field = EnrichField(rawValue: name), let value = compare.value(field, of: song) else {
-                        throw SelfTestFailure(description: "no \(name)")
-                    }
-                    compare.take(value, for: field)
+            for (key, source) in step["suggest"] as? [String: String] ?? [:] {
+                guard let field = EnrichField(rawValue: key), let value = editor.suggestions(field).first(where: { $0.source.rawValue == source })?.value else {
+                    throw SelfTestFailure(description: "no \(source) value for \(key)")
+                }
+                switch field {
+                case .cover: editor.cover = .image(URL(filePath: value), NSImage(contentsOfFile: value))
+                case .lyrics: editor.lyrics = .text(value)
+                default: editor.texts[field] = value
                 }
             }
+            if step["keepOpen"] as? Bool != true { await model.saveInfo(editor) }
+            try await settle()
+        case "chooseMatch":
+            // Opens 选择匹配 and waits for a search it starts.
+            await model.chooseMatch(try song(step.required("title")))
+            await model.ui.sheet?.picker?.search?.value
+            try await settle()
+        case "searchMatch":
+            let picker = try openPicker()
+            picker.keywords = try step.required("keywords")
+            model.enrich?.startSearch(picker)
+            await picker.search?.value
+            try await settle()
+        case "adoptMatch":
+            // The result at `index` or with `key`, as 采用; waits until it's applied.
+            let picker = try openPicker()
+            let song = step.string("key").flatMap { key in picker.results.first { $0.key == key } }
+                ?? step.number("index").flatMap { picker.results.indices.contains(Int($0)) ? picker.results[Int($0)] : nil }
+            guard let song, let enrich = model.enrich else { throw SelfTestFailure(description: "no such result") }
+            model.ui.sheet = nil
+            await enrich.choose(song, for: picker)
             try await settle()
         case "saveEditInfo":
-            try await saveSheet()
+            guard let editor = model.ui.sheet?.editor else { throw SelfTestFailure(description: "no edit sheet") }
+            await model.saveInfo(editor)
             try await settle()
         case "closeEditInfo":
-            model.ui.infoEditor = nil
-            model.ui.compare = nil
+            model.ui.sheet = nil
             try await settle()
         case "revertInfo":
             let index = try library().index
@@ -236,11 +234,9 @@ final class SelfTestRunner {
             await enrich.finish()
             try await settle()
         case "rejectMatch":
-            let title = try step.required("title")
-            guard let enrich = model.enrich, let row = try library().index.songs.first(where: { $0.title == title }) else {
-                throw SelfTestFailure(description: "no song \(title)")
-            }
-            model.ui.compare = nil
+            let row = try song(step.required("title"))
+            guard let enrich = model.enrich else { throw SelfTestFailure(description: "no enrichment") }
+            model.ui.sheet = nil
             await enrich.reject(row)
             try await settle()
         case "setSources":
@@ -263,7 +259,7 @@ final class SelfTestRunner {
             guard let row = try library().index.songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
             inspected[title] = ["album": row.album as Any? ?? NSNull(), "artists": row.artists, "composers": row.composers,
                                 "trackNo": row.trackNo as Any? ?? NSNull(), "year": row.year as Any? ?? NSNull(), "genre": row.genre as Any? ?? NSNull(),
-                                "hasLyrics": row.hasLyrics, "hasArtwork": row.hasArtwork, "coverFile": row.coverFile != nil,
+                                "hasLyrics": row.hasLyrics, "hasArtwork": row.hasArtwork, "coverFile": row.coverFile != nil, "userCover": row.userCover,
                                 "match": model.enrich?.match(row)?.status.rawValue ?? NSNull()] as Step
         case "like":
             let library = try library()
@@ -448,43 +444,41 @@ final class SelfTestRunner {
         }
     }
 
-    private func openCompare() throws -> SourceCompare {
-        guard let compare = model.ui.compare else { throw SelfTestFailure(description: "no 资料对照 sheet") }
-        return compare
+    private func song(_ title: String) throws -> TrackRow {
+        guard let row = try library().index.songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
+        return row
     }
 
-    /// As the sheet's 保存 button.
-    private func saveSheet() async throws {
-        if let compare = model.ui.compare, let enrich = model.enrich {
-            model.ui.compare = nil
-            await enrich.save(compare)
-        } else if let editor = model.ui.infoEditor {
-            await model.saveInfo(editor)
-        } else {
-            throw SelfTestFailure(description: "no edit sheet")
-        }
+    private func openPicker() throws -> MatchPicker {
+        guard let picker = model.ui.sheet?.picker else { throw SelfTestFailure(description: "no 选择匹配 sheet") }
+        return picker
     }
 
-    /// The open 资料对照 sheet.
-    private func compareState(_ compare: SourceCompare) -> Step {
-        func describe(_ choice: String?) -> Any { choice ?? NSNull() }
-        let cover: String? = switch compare.cover {
-        case .song(let song)?: song.key
-        case .file(let url, _)?: url.lastPathComponent
-        case .removed?: "removed"
-        case nil: nil
+    private func pickerState(_ picker: MatchPicker) -> Step {
+        ["keywords": picker.keywords, "searching": picker.searching, "stored": picker.status.isEmpty,
+         "results": picker.results.map(\.key), "selected": picker.selection ?? NSNull(),
+         "status": Dictionary(uniqueKeysWithValues: picker.status.map { source, status in
+             (source.rawValue, { () -> Any in
+                 switch status {
+                 case .searching: "searching"
+                 case .found(let count): count
+                 case .failed: "failed"
+                 }
+             }())
+         })]
+    }
+
+    private func editorState(_ editor: InfoEditor) -> Step {
+        func describe(_ choice: InfoEditor.Choice?) -> Any {
+            switch choice {
+            case .text(let text)?: text
+            case .image(let url, _)?: url.lastPathComponent
+            case .removed?: "removed"
+            case nil: NSNull()
+            }
         }
-        let lyrics: String? = switch compare.lyricsChoice {
-        case .song(let song)?: song.key
-        case .text?: "text"
-        case .removed?: "removed"
-        case nil: nil
-        }
-        return ["keywords": compare.keywords, "searching": compare.searching,
-                "results": Dictionary(uniqueKeysWithValues: compare.results.map { ($0.key.rawValue, $0.value.map(\.title)) }),
-                "picked": Dictionary(uniqueKeysWithValues: compare.sources.map { ($0.rawValue, compare.song($0)?.key ?? "") }),
-                "texts": Dictionary(uniqueKeysWithValues: compare.editor.fields.compactMap { field in compare.editor.texts[field].map { (field.rawValue, $0) } }),
-                "cover": describe(cover), "lyrics": describe(lyrics)]
+        return ["texts": Dictionary(uniqueKeysWithValues: editor.texts.map { ($0.key.rawValue, $0.value) }),
+                "sources": editor.layers.map(\.source.rawValue), "cover": describe(editor.cover), "lyrics": describe(editor.lyrics)]
     }
 
     private func enrichState(_ enrich: EnrichModel) -> Step {
@@ -707,7 +701,8 @@ final class SelfTestRunner {
             "measure": measures,
             "inspected": inspected,
             "enrich": model.enrich.map(enrichState) ?? NSNull(),
-            "compare": model.ui.compare.map(compareState) ?? NSNull(),
+            "picker": model.ui.sheet?.picker.map(pickerState) ?? NSNull(),
+            "editor": model.ui.sheet?.editor.map(editorState) ?? NSNull(),
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],

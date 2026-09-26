@@ -104,9 +104,22 @@ import LocalMusicCore
         write { try await $0.setLiked(ids, on) }
     }
 
-    /// Manual edits (nil removes one) for these recordings; returns once the library shows them.
+    /// Manual edits (nil removes one) for these recordings; returns once the library shows them. A manual cover (a file
+    /// in the covers directory) that's replaced or removed is deleted, and so is a new one that couldn't be stored.
     func setUserEdits(_ fingerprints: [String], _ edits: [EnrichField: String?]) async {
-        write { try await $0.setEnrichment(fingerprints, edits, source: .user) }
+        write { store in
+            let cover = edits[.cover] ?? nil
+            var replaced: [String] = []
+            if edits[.cover] != nil {
+                for fingerprint in fingerprints { if let old = try await store.enrichment(fingerprint, source: .user)[.cover] { replaced.append(old) } }
+            }
+            let covers = store.coversDirectory
+            do { try await store.setEnrichment(fingerprints, edits, source: .user) } catch {
+                if let cover { try? FileManager.default.removeItem(at: covers.appending(path: cover)) }
+                throw error
+            }
+            for old in replaced where old != cover { try? FileManager.default.removeItem(at: covers.appending(path: old)) }
+        }
         await reloadAfterWrites()
     }
 
@@ -125,9 +138,20 @@ import LocalMusicCore
         (try? await store.enrichment(fingerprint, source: .user)) ?? [:]
     }
 
-    /// The songs as they'd show without manual edits.
-    func uneditedRows(_ ids: [Int64]) async -> [TrackRow] {
-        (try? await store.rows(ids, without: [.user])) ?? []
+    /// The songs as they'd show without these layers.
+    func rows(_ ids: [Int64], without sources: [EnrichSource]) async -> [TrackRow] {
+        (try? await store.rows(ids, without: sources)) ?? []
+    }
+
+    /// One recording's online layers; covers as paths.
+    func layers(_ fingerprint: String) async -> [OnlineSource: [EnrichField: String]] {
+        var layers: [OnlineSource: [EnrichField: String]] = [:]
+        for source in OnlineSource.allCases {
+            var values = (try? await store.enrichment(fingerprint, source: .online(source))) ?? [:]
+            values[.cover] = values[.cover].map { store.coversDirectory.appending(path: $0).path }
+            if !values.isEmpty { layers[source] = values }
+        }
+        return layers
     }
 
     /// After enrichment stored new values.

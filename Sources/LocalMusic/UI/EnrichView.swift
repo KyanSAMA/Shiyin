@@ -43,12 +43,14 @@ struct EnrichView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 List(rows, selection: $ui.enrichSelection) { row in
-                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row)) { compare(row) }
+                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row),
+                              applying: row.fingerprint.map(enrich.applying.contains) ?? false) { choose(row) }
                         .contextMenu {
+                            Button("选择匹配…") { choose(row) }
+                            Button("编辑信息…") { Task { await model.editInfo([row]) } }
                             Button("重新查找") { enrich.enrich([row]) }
-                            Button("资料对照…") { compare(row) }
-                            if enrich.match(row).map({ $0.status != .rejected }) ?? false {
-                                Button("清除补全并不再查找") { Task { await enrich.reject(row) } }
+                            if let status = enrich.match(row)?.status, status != .rejected {
+                                Button(status.rejectTitle) { Task { await enrich.reject(row) } }
                             }
                         }
                 }
@@ -57,8 +59,8 @@ struct EnrichView: View {
         }
     }
 
-    private func compare(_ row: TrackRow) {
-        Task { await model.editInfo([row]) }
+    private func choose(_ row: TrackRow) {
+        Task { await model.chooseMatch(row) }
     }
 
     @ViewBuilder private func actions(rows: [TrackRow]) -> some View {
@@ -87,6 +89,7 @@ private struct EnrichRow: View {
     let store: ArtworkStore
     let row: TrackRow
     let match: MatchState?
+    let applying: Bool
     let choose: () -> Void
 
     var body: some View {
@@ -109,6 +112,14 @@ private struct EnrichRow: View {
     }
 
     @ViewBuilder private var status: some View {
+        if applying {
+            ProgressView().controlSize(.small)
+        } else {
+            label
+        }
+    }
+
+    @ViewBuilder private var label: some View {
         switch match?.status {
         case .auto?, .confirmed?: Label("已补全", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
         case .pending?: Button("选择…", action: choose)
@@ -119,7 +130,7 @@ private struct EnrichRow: View {
     }
 }
 
-private struct Badge: View {
+struct Badge: View {
     let text: String
 
     var body: some View {
@@ -129,5 +140,16 @@ private struct Badge: View {
             .padding(.vertical, 2)
             .background(.quaternary, in: Capsule())
             .foregroundStyle(.secondary)
+    }
+}
+
+extension MatchStatus {
+    /// What rejecting a song in this state does.
+    var rejectTitle: String {
+        switch self {
+        case .pending: "都不是"
+        case .auto, .confirmed: "清除补全并不再查找"
+        case .none, .rejected: "不再查找"
+        }
     }
 }

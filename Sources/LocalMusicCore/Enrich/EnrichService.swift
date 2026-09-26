@@ -71,10 +71,10 @@ public actor EnrichService {
         }
     }
 
-    /// A result's cover for the 资料对照 sheet (not paced: image CDNs, not the APIs).
-    public func thumbnail(_ song: OnlineSong) async throws -> Data? { try await client.cover(song, pixels: 100) }
+    /// A result's cover for the 选择匹配 sheet (not paced: image CDNs, not the APIs).
+    public func thumbnail(_ song: OnlineSong, pixels: Int) async throws -> Data? { try await client.cover(song, pixels: pixels) }
 
-    /// For the 资料对照 sheet: a search with the user's keywords.
+    /// For the 选择匹配 sheet: a search with the user's keywords.
     public func search(_ source: OnlineSource, _ keywords: String, storefront: String) async throws -> [OnlineSong] {
         try await paced(source) { try await self.client.search(source, keywords, storefront: storefront) }
     }
@@ -90,23 +90,14 @@ public actor EnrichService {
         song.source == .netease || song.source == .qq ? try await paced(song.source) { try await self.client.lyrics(song) } : try await client.lyrics(song)
     }
 
-    /// A cover picked for a manual edit, from a song or an image file; returns its name in the covers directory.
-    public func saveCover(_ source: CoverSource, fingerprint: String) async throws -> String? {
-        let (data, type): (Data?, String) = switch source {
-        case .song(let song): (try await paced(song.source) { try await self.client.cover(song) }, "jpg")
-        case .file(let url): (try Data(contentsOf: url), url.pathExtension.lowercased())
-        }
-        guard let data else { return nil }
+    /// An image file chosen as a manual cover, copied into the covers directory; returns its name there.
+    public func saveCover(_ url: URL, fingerprint: String) throws -> String {
+        let data = try Data(contentsOf: url)
         let covers = store.coversDirectory
-        let name = "\(fingerprint.replacing(":", with: "-"))-user-\(Int(Date().timeIntervalSince1970 * 1000)).\(type)"
+        let name = "\(fingerprint.replacing(":", with: "-"))-user-\(Int(Date().timeIntervalSince1970 * 1000)).\(url.pathExtension.lowercased())"
         try FileManager.default.createDirectory(at: covers, withIntermediateDirectories: true)
         try data.write(to: covers.appending(path: name))
         return name
-    }
-
-    public enum CoverSource: Sendable {
-        case song(OnlineSong)
-        case file(URL)
     }
 
     private func serial<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
@@ -117,47 +108,28 @@ public actor EnrichService {
     }
 
     private func lookUp(_ job: EnrichJob) async -> EnrichOutcome {
-        var layers: [OnlineSource: [EnrichField: String]] = [:], applied: [OnlineSong] = [], undecided: [OnlineSong] = []
-        var asked = 0, failures: [String] = []
         do {
-            var gaps = try await gaps(job)
+            var gaps = try await gaps(job), found = Found()
             if let id = job.songID, job.sources.contains(.netease) {
-                asked += 1
+                found.asked += 1
                 do {
                     if let song = try await paced(.netease, { try await self.client.neteaseSong(id) }) {
-                        layers[.netease] = try await values(song, job, gaps: &gaps)
-                        applied.append(song)
+                        try await take(song, job, &found, gaps: &gaps)
                     }
                 } catch {
-                    failures.append(String(describing: error))
+                    found.failures.append(String(describing: error))
                 }
             }
-            // LRCLIB goes last whatever its place: it only supplements a song another source knows.
-            let order = job.sources.filter { $0 != .lrclib } + job.sources.filter { $0 == .lrclib }
-            for source in order where layers[source] == nil && !gaps.isDisjoint(with: source.fills) && (source != .lrclib || !applied.isEmpty) {
-                asked += 1
-                do {
-                    let found = try await paced(source) { try await self.client.search(source, job.query.keywords, storefront: job.storefront) }
-                    switch Matcher.match(job.query, candidates: found) {
-                    case .confident(let song, _):
-                        layers[source] = try await values(song, job, gaps: &gaps)
-                        applied.append(song)
-                    case .uncertain(let songs): undecided += songs
-                    case .none: break
-                    }
-                } catch {
-                    failures.append(String(describing: error))
-                }
+            await search(job, found.applied.first.map(job.query.pinned) ?? job.query, &found, gaps: &gaps)
+            if !found.applied.isEmpty {
+                try await save(job.fingerprint, found.layers, .auto)
+                return .applied(found.applied)
             }
-            if !applied.isEmpty {
-                try await save(job.fingerprint, layers, .auto)
-                return .applied(applied)
-            }
-            if asked > 0, failures.count == asked { return .failed(failures[0]) }
+            if found.asked > 0, found.failures.count == found.asked { return .failed(found.failures[0]) }
             let current = try await store.matches(job.fingerprint)[job.fingerprint]?.status
             let keeps = current == .auto || current == .confirmed
             // The best five across the sources.
-            guard case .uncertain(let best) = Matcher.match(job.query, candidates: undecided) else {
+            guard case .uncertain(let best) = Matcher.match(job.query, candidates: found.undecided) else {
                 if !keeps { try await store.setMatch(job.fingerprint, .none) }
                 return .notFound
             }
@@ -165,6 +137,47 @@ public actor EnrichService {
             return .pending(best)
         } catch {
             return .failed(String(describing: error))
+        }
+    }
+
+    /// The user's pick becomes the song's match, replacing every online layer; the other sources are asked with the
+    /// pick's title, artists and album, keeping only confident matches. `candidates` stay for picking again.
+    public func apply(_ song: OnlineSong, to job: EnrichJob, candidates: [OnlineSong]) async throws -> [OnlineSong] {
+        try await serial {
+            var gaps = try await self.gaps(job), found = Found()
+            try await self.take(song, job, &found, gaps: &gaps)
+            await self.search(job, job.query.pinned(song), &found, gaps: &gaps)
+            try await self.save(job.fingerprint, found.layers, .confirmed, candidates: candidates)
+            return found.applied
+        }
+    }
+
+    private struct Found {
+        var layers: [OnlineSource: [EnrichField: String]] = [:], applied: [OnlineSong] = [], undecided: [OnlineSong] = []
+        var asked = 0, failures: [String] = []
+    }
+
+    private func take(_ song: OnlineSong, _ job: EnrichJob, _ found: inout Found, gaps: inout Set<EnrichField>) async throws {
+        found.layers[song.source] = try await values(song, job, gaps: &gaps)
+        found.applied.append(song)
+    }
+
+    /// Asks the sources without a layer yet, in order, each only while it can fill a gap; LRCLIB goes last whatever its
+    /// place, as it only supplements a song another source knows.
+    private func search(_ job: EnrichJob, _ query: MatchQuery, _ found: inout Found, gaps: inout Set<EnrichField>) async {
+        let order = job.sources.filter { $0 != .lrclib } + job.sources.filter { $0 == .lrclib }
+        for source in order where found.layers[source] == nil && !gaps.isDisjoint(with: source.fills) && (source != .lrclib || !found.applied.isEmpty) {
+            found.asked += 1
+            do {
+                let songs = try await paced(source) { try await self.client.search(source, query.keywords, storefront: job.storefront) }
+                switch Matcher.match(query, candidates: songs) {
+                case .confident(let song, _): try await take(song, job, &found, gaps: &gaps)
+                case .uncertain(let songs): found.undecided += songs
+                case .none: break
+                }
+            } catch {
+                found.failures.append(String(describing: error))
+            }
         }
     }
 
@@ -191,7 +204,7 @@ public actor EnrichService {
             values[.discNo] = song.discNo.map(String.init)
             values[.genre] = song.genre
             var year = song.year
-            if year == nil, gaps.contains(.year), song.source == .netease, job.songID == nil { year = try? await neteaseYear(song) }
+            if year == nil, gaps.contains(.year), song.source == .netease { year = try? await neteaseYear(song) }
             values[.year] = year.map(String.init)
         }
         if gaps.contains(.lyrics), let lyrics = try await self.lyrics(song) {
@@ -212,11 +225,12 @@ public actor EnrichService {
 
     /// Replaces every online layer with these, removing the cover files no longer referenced (or the new ones if saving
     /// fails).
-    private func save(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus) async throws {
+    private func save(_ fingerprint: String, _ layers: [OnlineSource: [EnrichField: String]], _ status: MatchStatus,
+                      candidates: [OnlineSong] = []) async throws {
         let covers = store.coversDirectory
         let all = Dictionary(uniqueKeysWithValues: OnlineSource.allCases.map { ($0, layers[$0] ?? [:]) })
         do {
-            for name in try await store.applyMatch(fingerprint, all, status) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
+            for name in try await store.applyMatch(fingerprint, all, status, candidates: candidates) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
         } catch {
             for name in layers.values.compactMap({ $0[.cover] }) { try? FileManager.default.removeItem(at: covers.appending(path: name)) }
             throw error
