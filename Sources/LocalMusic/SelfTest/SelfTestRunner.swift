@@ -462,7 +462,7 @@ final class SelfTestRunner {
                  switch status {
                  case .searching: "searching"
                  case .found(let count): count
-                 case .failed: "failed"
+                 case .failed(let error): "failed: \(error)"
                  }
              }())
          })]

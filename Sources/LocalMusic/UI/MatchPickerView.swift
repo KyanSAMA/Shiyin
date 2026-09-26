@@ -59,16 +59,7 @@ struct MatchPickerView: View {
         } else if picker.status.isEmpty {
             Text(picker.results.isEmpty ? "还没有候选，可以搜索" : "上次查找找到的 \(picker.results.count) 个候选")
         } else {
-            HStack(spacing: 10) {
-                ForEach(picker.sources, id: \.self) { source in
-                    switch picker.status[source] {
-                    case .searching?: Text("\(source.title) 搜索中…")
-                    case .found(let count)?: Text("\(source.title) \(count)")
-                    case .failed(let error)?: Text("\(source.title) 请求失败").foregroundStyle(.orange).help(error)
-                    case nil: EmptyView()
-                    }
-                }
-            }
+            SourceStatusLine(picker: picker)
         }
     }
 
@@ -131,6 +122,27 @@ struct MatchPickerView: View {
     }
 }
 
+/// Each source's progress, read in its own body (no `ForEach`), so a source that answers late always shows.
+private struct SourceStatusLine: View {
+    let picker: MatchPicker
+
+    var body: some View {
+        let parts = picker.sources.map { source -> Text in
+            switch picker.status[source] {
+            case .searching?: Text("\(source.title) 搜索中…")
+            case .found(let count)?: Text("\(source.title) \(count)")
+            case .failed?: Text("\(source.title) 请求失败").foregroundStyle(Color.orange)
+            case nil: Text("")
+            }
+        }
+        let failures = picker.sources.compactMap { source in
+            if case .failed(let error)? = picker.status[source] { "\(source.title)：\(error)" } else { nil }
+        }
+        parts.dropFirst().reduce(parts.first ?? Text("")) { Text("\($0)    \($1)") }
+            .help(failures.joined(separator: "\n"))
+    }
+}
+
 private struct CandidateRow: View {
     let enrich: EnrichModel
     let song: OnlineSong
@@ -178,15 +190,18 @@ private struct MatchDetail: View {
                         DurationDelta(song: song, duration: picker.row.duration)
                     }
                 }
+                // Read here, not inside ForEach, so a year loaded later shows. A value only from the file name is replaced.
+                let rows = Self.fields.compactMap { field in
+                    picker.value(field, of: song).map { (field: field, value: $0, current: base.shown(field), inferred: base.inferred.contains(field)) }
+                }
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
-                    ForEach(Self.fields, id: \.self) { field in
-                        if let value = picker.value(field, of: song) {
-                            let current = base.inferred.contains(field) ? "" : base.shown(field)
-                            GridRow {
-                                mark(current.isEmpty ? .fills : current == value ? .same : .kept)
-                                Text(field.label).foregroundStyle(.secondary)
-                                Text(current.isEmpty || current == value ? value : "\(value)（保留现有的 \(current)）").lineLimit(2)
-                            }
+                    ForEach(rows, id: \.field) { row in
+                        GridRow {
+                            mark(row.inferred || row.current.isEmpty ? .fills : row.current == row.value ? .same : .kept)
+                            Text(row.field.label).foregroundStyle(.secondary)
+                            Text(row.current.isEmpty || row.current == row.value ? row.value
+                                 : row.inferred ? "\(row.value)（替换文件名里的 \(row.current)）" : "\(row.value)（保留现有的 \(row.current)）")
+                                .lineLimit(2)
                         }
                     }
                     if song.coverURL != nil {
