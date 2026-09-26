@@ -35,6 +35,7 @@
     { "do": "wait", "seconds": 0.8 },
     { "do": "snapshot", "name": "candidates", "window": "sheet" },
     { "do": "chooseCandidate", "title": "无标签标题", "index": 0 },
+    { "do": "assert", "path": "enrich.counts.missingLyrics", "equals": 6 },
     { "do": "inspect", "title": "无标签标题" },
     { "do": "assert", "path": "inspected.无标签标题.match", "equals": "confirmed" },
     { "do": "assert", "path": "inspected.无标签标题.album", "equals": "某张专辑" },

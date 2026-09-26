@@ -153,14 +153,16 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Folder art isn't checked here (a file lookup per song); enrichment still skips covers a folder image provides.
+    /// The missing-* views list what's left to do: a matched song's remaining gaps are ones NetEase can't fill (shown in
+    /// 已补全). Folder art isn't checked here (a file lookup per song); enrichment still skips covers a folder image provides.
     func includes(_ row: TrackRow, _ match: MatchState?) -> Bool {
-        switch self {
-        case .missingCover: !row.hasArtwork
-        case .missingLyrics: !row.hasLyrics
-        case .missingInfo: Self.missingInfo(row)
+        let applied = match?.status == .auto || match?.status == .confirmed
+        return switch self {
+        case .missingCover: !applied && !row.hasArtwork
+        case .missingLyrics: !applied && !row.hasLyrics
+        case .missingInfo: !applied && Self.missingInfo(row)
         case .pending: match?.status == .pending
-        case .done: match?.status == .auto || match?.status == .confirmed
+        case .done: applied
         }
     }
 

@@ -91,7 +91,7 @@ public actor EnrichService {
         }
     }
 
-    /// Replaces the song's NetEase layer with `song`: basic fields always, lyrics (with their credits as composers) and the
+    /// Replaces the song's NetEase layer with `song`: basic fields always (a year missing from search results from the song's detail), lyrics (with their credits as composers) and the
     /// cover only if the file lacks them.
     private func store(_ song: NeteaseSong, for job: EnrichJob, status: MatchStatus, confidence: Double?) async throws {
         var values: [EnrichField: String] = [.title: song.title]
@@ -99,7 +99,10 @@ public actor EnrichService {
         if !song.album.isEmpty { values[.album] = song.album }
         values[.trackNo] = song.trackNo.map(String.init)
         values[.discNo] = song.discNo.map(String.init)
-        values[.year] = song.year.map(String.init)
+        // Search results often carry no release date; the song's detail has its album's.
+        var year = song.year
+        if year == nil, job.songID == nil { year = (try? await paced { try await self.client.song(song.id) })??.year }
+        values[.year] = year.map(String.init)
         if job.needsLyrics, let lyrics = try await paced({ try await self.client.lyrics(song.id) }) {
             values[.lyrics] = lyrics
             if let composers = LRCParser.parse(lyrics)?.credits.composers, !composers.isEmpty { values[.composers] = EnrichField.encode(composers) }
