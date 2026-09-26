@@ -37,6 +37,27 @@
       }
     },
     {
+      "do": "sidebar",
+      "value": "enrich"
+    },
+    {
+      "do": "enrichFilter",
+      "value": "unwritten"
+    },
+    {
+      "do": "assert",
+      "path": "enrich.counts.unwritten",
+      "equals": 1
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "unwritten"
+    },
+    {
       "do": "play",
       "title": "群青"
     },
@@ -102,6 +123,16 @@
     },
     {
       "do": "closeEditInfo"
+    },
+    {
+      "do": "assert",
+      "path": "enrich.counts.unwritten",
+      "equals": 0
+    },
+    {
+      "do": "assert",
+      "path": "enrich.counts.written",
+      "equals": 1
     },
     {
       "do": "readFile",

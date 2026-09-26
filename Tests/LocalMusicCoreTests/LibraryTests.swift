@@ -322,6 +322,30 @@ struct LibraryIndexTests {
         #expect(try await lyrics() == ["mine"] && row.userCover && ArtworkCache.source(for: row)?.folderImage?.lastPathComponent == "mine.jpg")
     }
 
+    @Test func flagsWhatTheTagsDontCarryYet() async throws {
+        let lib = try TempLibrary()
+        try lib.flac("One.flac", ["TITLE=One", "ALBUM=Tagged", "TRACKNUMBER=1", "LYRICS=[00:00.00]作曲 : X\n[00:01.00]file"])
+        _ = try await lib.scan()
+        let fingerprint = try #require(try await lib.store.rows().first { $0.title == "One" }?.fingerprint)
+        func unwritten() async throws -> Bool { try #require(try await lib.store.rows().first { $0.title == "One" }).unwritten }
+        #expect(try await !unwritten())
+        try await lib.store.setEnrichment([fingerprint], [.album: "Tagged", .year: "2020"], source: .online(.qq))
+        #expect(try await unwritten())                          // an online year the file lacks
+        try await lib.store.setEnrichment([fingerprint], [.year: nil], source: .online(.qq))
+        #expect(try await !unwritten())                         // an online album the file has isn't written
+        try await lib.store.setEnrichment([fingerprint], [.album: "Tagged"], source: .user)
+        #expect(try await !unwritten())                         // a manual value equal to the file's
+        try await lib.store.setEnrichment([fingerprint], [.album: "Mine"], source: .user)
+        #expect(try await unwritten())
+        try await lib.store.setEnrichment([fingerprint], [.album: nil, .trackNo: "01", .composers: EnrichField.encode(["X"])], source: .user)
+        #expect(try await !unwritten())                         // "01" is the file's 1; the credited composer is the file's
+        try await lib.store.setEnrichment([fingerprint], [.trackNo: nil, .composers: nil, .lyrics: "[00:00.00]作曲 : X\n[00:01.00]file\n"], source: .user)
+        #expect(try await !unwritten())                         // manual lyrics the file embeds (compared trimmed)
+        try await lib.store.setEnrichment([fingerprint], [.lyrics: nil], source: .user)
+        try await lib.store.setEnrichment([fingerprint], [.lyrics: "[00:01.00]online"], source: .online(.qq))
+        #expect(try await !unwritten())                         // online lyrics don't replace the file's
+    }
+
     @Test func ordersSameTitledAlbumsDeterministically() {
         let rows = [row(1, "a", artists: ["B"]), row(2, "b", artists: ["A"]), row(3, "c", album: "S", artists: ["C"], dir: "/2"),
                     row(4, "d", album: "S", artists: ["C"], dir: "/1")]

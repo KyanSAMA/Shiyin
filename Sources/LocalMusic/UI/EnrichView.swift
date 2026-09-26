@@ -1,8 +1,8 @@
 import SwiftUI
 import LocalMusicCore
 
-/// 信息补全: songs missing a cover, lyrics or basic info, filled from the online sources on request. Only gaps are filled; the
-/// files are never touched.
+/// 信息补全: songs missing a cover, lyrics or basic info, filled from the online sources on request (only gaps, unless a
+/// pick replaces); and what isn't written into the files yet, or was.
 struct EnrichView: View {
     let model: AppModel
     let enrich: EnrichModel
@@ -10,27 +10,28 @@ struct EnrichView: View {
 
     var body: some View {
         @Bindable var ui = model.ui
-        let rows = ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, enrich.match($0)) }
-        let counts = EnrichFilter.counts(index.songs, enrich.match)
+        let backedUp = model.library?.backedUp ?? []
+        let rows = ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, enrich.match($0), backedUp: backedUp) }
+        let counts = EnrichFilter.counts(index.songs, enrich.match, backedUp: backedUp)
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("信息补全").font(.system(size: 26, weight: .bold))
-                        Text("从在线来源（在设置里选择）补全缺失的封面、歌词、曲序、年份和流派。只填空缺，不改动文件里已有的信息，也不修改音频文件。")
+                        Text(EnrichFilter.writing.contains(ui.enrichFilter)
+                             ? "未写入：App 里显示的信息（手动修改、替换、在线补全）还没写进音频文件的标签。已写入：写过文件、可以恢复原标签的歌。"
+                             : "从在线来源（在设置里选择）补全缺失的封面、歌词、曲序、年份和流派。只填空缺，不改动文件里已有的信息，也不修改音频文件。")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 16)
                     actions(rows: rows)
                 }
-                Picker("", selection: $ui.enrichFilter) {
-                    ForEach(EnrichFilter.allCases) { filter in
-                        Text("\(filter.title) \(counts[filter] ?? 0)").tag(filter)
-                    }
+                HStack {
+                    filters(EnrichFilter.enrichment, counts: counts)
+                    Spacer(minLength: 16)
+                    filters(EnrichFilter.writing, counts: counts)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 if let notice = enrich.notice {
                     Label(notice, systemImage: "info.circle").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -75,6 +76,17 @@ struct EnrichView: View {
         }
     }
 
+    /// Two segmented groups sharing one selection: the enrichment views and the 写入文件 ones.
+    private func filters(_ filters: [EnrichFilter], counts: [EnrichFilter: Int]) -> some View {
+        Picker("", selection: Binding(get: { filters.contains(model.ui.enrichFilter) ? model.ui.enrichFilter : nil },
+                                      set: { if let filter = $0 { model.ui.enrichFilter = filter } })) {
+            ForEach(filters) { filter in Text("\(filter.title) \(counts[filter] ?? 0)").tag(Optional(filter)) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+
     private func choose(_ row: TrackRow) {
         Task { await model.chooseMatch(row) }
     }
@@ -86,6 +98,15 @@ struct EnrichView: View {
                 Text("\(progress.done) / \(progress.total)").monospacedDigit().foregroundStyle(.secondary)
                 Button("停止") { enrich.stop() }
             }
+        } else if model.ui.enrichFilter == .unwritten {
+            HStack(spacing: 10) {
+                let selected = rows.filter { model.ui.enrichSelection.contains($0.id) }
+                Button("写入所选（\(selected.count)）…") { Task { await model.planTagWrite(selected) } }.disabled(selected.isEmpty)
+                Button("全部写入…") { Task { await model.planTagWrite(rows) } }.buttonStyle(.borderedProminent).disabled(rows.isEmpty)
+            }
+        } else if model.ui.enrichFilter == .written {
+            let selected = rows.filter { model.ui.enrichSelection.contains($0.id) }
+            Button("恢复所选（\(selected.count)）…") { model.planTagRestore(selected) }.disabled(selected.isEmpty)
         } else {
             HStack(spacing: 10) {
                 let selected = rows.filter { model.ui.enrichSelection.contains($0.id) }

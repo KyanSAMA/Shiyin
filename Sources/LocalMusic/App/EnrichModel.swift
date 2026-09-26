@@ -163,7 +163,10 @@ import LocalMusicCore
 
 /// The 信息补全 page's views of the library.
 enum EnrichFilter: String, CaseIterable, Identifiable {
-    case missingCover, missingLyrics, missingInfo, pending, done
+    case missingCover, missingLyrics, missingInfo, pending, done, unwritten, written
+
+    static let enrichment: [EnrichFilter] = [.missingCover, .missingLyrics, .missingInfo, .pending, .done]
+    static let writing: [EnrichFilter] = [.unwritten, .written]
 
     var id: Self { self }
 
@@ -174,12 +177,15 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         case .missingInfo: "缺信息"
         case .pending: "待确认"
         case .done: "已补全"
+        case .unwritten: "未写入"
+        case .written: "已写入"
         }
     }
 
     /// The missing-* views list what's left to do: a matched song's remaining gaps are ones no source filled (shown in
     /// 已补全). Folder art isn't checked here (a file lookup per song); enrichment still skips covers a folder image provides.
-    func includes(_ row: TrackRow, _ match: MatchState?) -> Bool {
+    /// `backedUp`: the files written to (with a tag backup).
+    func includes(_ row: TrackRow, _ match: MatchState?, backedUp: Set<String>) -> Bool {
         let applied = match?.status == .auto || match?.status == .confirmed
         return switch self {
         case .missingCover: !applied && !row.hasArtwork
@@ -187,6 +193,8 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         case .missingInfo: !applied && Self.missingInfo(row)
         case .pending: match?.status == .pending
         case .done: applied
+        case .unwritten: row.unwritten
+        case .written: backedUp.contains(row.path)
         }
     }
 
@@ -198,12 +206,12 @@ enum EnrichFilter: String, CaseIterable, Identifiable {
         (!row.hasArtwork && !(checkingFolderArt && ArtworkCache.hasFolderImage(near: row))) || !row.hasLyrics || missingInfo(row)
     }
 
-    /// All five counts in one pass.
-    static func counts(_ rows: [TrackRow], _ match: (TrackRow) -> MatchState?) -> [EnrichFilter: Int] {
+    /// All counts in one pass.
+    static func counts(_ rows: [TrackRow], _ match: (TrackRow) -> MatchState?, backedUp: Set<String>) -> [EnrichFilter: Int] {
         var counts: [EnrichFilter: Int] = [:]
         for row in rows {
             let state = match(row)
-            for filter in allCases where filter.includes(row, state) { counts[filter, default: 0] += 1 }
+            for filter in allCases where filter.includes(row, state, backedUp: backedUp) { counts[filter, default: 0] += 1 }
         }
         return counts
     }

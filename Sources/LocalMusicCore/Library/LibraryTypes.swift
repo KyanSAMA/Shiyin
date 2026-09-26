@@ -70,6 +70,10 @@ public struct TrackRow: Sendable, Identifiable, Hashable {
     public var userCover = false
     /// Title and track number only from the file name, so any source's replaces them.
     public var inferred: Set<EnrichField> = []
+    /// A FLAC or MP3 showing what its tags don't carry yet: a manual value other than the file's, an online value where
+    /// the file has none, manual lyrics or cover not in the file, online lyrics or cover it lacks. What 写入文件 would write
+    /// (a folder image isn't checked, so an online cover counts even beside one).
+    public var unwritten = false
 
     public var url: URL { URL(filePath: path) }
     public var hasArtwork: Bool { hasCover || coverFile != nil }

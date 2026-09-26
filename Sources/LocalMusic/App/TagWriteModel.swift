@@ -78,7 +78,7 @@ extension AppModel {
                 if !value.isEmpty, value != fileValue { item.changes.append(.init(field: field, old: fileValue, new: value, manual: edits[field] != nil)) }
             }
             if let lyrics = await library.enrichedLyrics(fingerprint), lyrics.manual || !row.hasFileLyrics,
-               await library.embeddedLyrics(row.id) != lyrics.text {
+               await library.embeddedLyrics(row.id) != lyrics.text.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters)) {
                 let lines = lyrics.text.split(whereSeparator: \.isNewline).count
                 item.changes.append(.init(field: .lyrics, old: row.hasFileLyrics ? "有歌词" : "", new: "\(lines) 行", manual: lyrics.manual))
                 if lyrics.manual, FileManager.default.fileExists(atPath: row.url.deletingPathExtension().appendingPathExtension("lrc").path) {

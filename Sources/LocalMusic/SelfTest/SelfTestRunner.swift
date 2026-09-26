@@ -541,7 +541,7 @@ final class SelfTestRunner {
     private func enrichState(_ enrich: EnrichModel) -> Step {
         let songs = model.library?.index.songs ?? []
         func titles(_ status: MatchStatus) -> [String] { songs.filter { enrich.match($0)?.status == status }.map(\.title).sorted() }
-        let counts = EnrichFilter.counts(songs, enrich.match)
+        let counts = EnrichFilter.counts(songs, enrich.match, backedUp: model.library?.backedUp ?? [])
         return ["running": enrich.progress != nil, "notice": enrich.notice ?? NSNull(),
                 "counts": Dictionary(uniqueKeysWithValues: EnrichFilter.allCases.map { ($0.rawValue, counts[$0] ?? 0) }),
                 "auto": titles(.auto), "confirmed": titles(.confirmed), "pending": titles(.pending), "none": titles(.none), "rejected": titles(.rejected),
@@ -574,7 +574,7 @@ final class SelfTestRunner {
             case .recent: return ui.recentAlbums(in: index).map(\.title)
             case .liked: return ui.likedSongs(in: index, liked: model.library?.liked ?? [:]).map(\.title)
             case .enrich:
-                return ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, model.enrich?.match($0)) }.map(\.title)
+                return ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, model.enrich?.match($0), backedUp: model.library?.backedUp ?? []) }.map(\.title)
             case .playlist(let id):
                 return ui.narrowed(model.library?.playlist(id)?.trackIDs.compactMap { index.tracks[$0] } ?? [], in: index).map(\.title)
             case .artists: return ui.people(.artist, in: index).map(\.name)

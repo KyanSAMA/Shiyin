@@ -394,6 +394,14 @@ public actor LibraryStore {
             layers[fingerprint, default: [:]][field, default: [:]][source] = value
         }
         let covers = coversDirectory, order = onlineOrder().map(EnrichSource.online)
+        // Tracks whose file embeds their manual lyrics (trimmed as the reader does); driven by the few manual lyrics.
+        let trim = CharacterSet.whitespacesAndNewlines.union(.controlCharacters)
+        let lyricsInFile = Set(try db.query("""
+            SELECT t.id, e.value, l.lrc FROM enrichment e JOIN track t ON t.fingerprint = e.fingerprint
+            JOIN lyrics l ON l.track_id = t.id AND l.source = 'embedded'
+            WHERE e.field = 'lyrics' AND e.source = 'user'\(only("t.id"))
+            """) { ($0.int64(0)!, $0.string(1)!.trimmingCharacters(in: trim) == $0.string(2)?.trimmingCharacters(in: trim)) }
+            .filter(\.1).map(\.0))
         return try db.query("""
             SELECT id, path, title, album, album_artist, track_no, disc_no, year, genre, duration, format, sample_rate,
                    bit_depth, has_cover, has_lyrics, added_at, file_mtime, cover_offset, cover_length, codec, fingerprint, title_source,
@@ -413,6 +421,30 @@ public actor LibraryStore {
             }
             let title = r.string(2) ?? "", tagged = r.string(21) == ValueSource.tag.rawValue, trackTagged = r.string(22) == ValueSource.tag.rawValue
             let credited = people[id]
+            // What 写入文件 compares: the shown value (not one only guessed from the file name) against the file's own,
+            // lyric credits counting as the file's composers; numbers as numbers.
+            func number(_ value: String?) -> String { value.flatMap { Int($0) }.map(String.init) ?? "" }
+            let composers = credited.map { $0.composers.isEmpty ? $0.credited : $0.composers } ?? []
+            let fields: [(shown: String, own: String)] = [
+                (tagged || layer[.title] != nil ? pick(.title, tagged ? title : nil) ?? "" : "", tagged ? title : ""),
+                (pick(.album, r.string(3)) ?? "", r.string(3) ?? ""), (pick(.albumArtist, r.string(4)) ?? "", r.string(4) ?? ""),
+                (names(.artists, credited?.artists ?? []).joined(separator: " / "), (credited?.artists ?? []).joined(separator: " / ")),
+                (names(.composers, credited?.composers ?? [], inferred: credited?.credited ?? []).joined(separator: " / "),
+                 composers.joined(separator: " / ")),
+                (trackTagged || layer[.trackNo] != nil ? number(pick(.trackNo, trackTagged ? r.int(5).map(String.init) : nil)) : "",
+                 trackTagged ? number(r.int(5).map(String.init)) : ""),
+                (number(pick(.discNo, r.int(6).map(String.init))), number(r.int(6).map(String.init))),
+                (number(pick(.year, r.int(7).map(String.init))), number(r.int(7).map(String.init))),
+                (pick(.genre, r.string(8)) ?? "", r.string(8) ?? ""),
+            ]
+            // A manual cover the file already embeds (same size: covers are written as they are) isn't pending.
+            let userCover = layer[.cover]?[.user].map { covers.appending(path: $0) }
+            let unwritten = ["flac", "mp3"].contains(r.string(10) ?? "") && (
+                fields.contains { !$0.shown.isEmpty && $0.shown != $0.own }
+                || layer[.lyrics]?[.user] != nil && !lyricsInFile.contains(id)
+                || layer[.lyrics]?[.user] == nil && layer[.lyrics] != nil && r.int(14) != 1
+                || userCover.map { (try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) != r.int(18) } ?? false
+                || userCover == nil && online(.cover) != nil && r.int(13) != 1)
             return TrackRow(id: id, path: r.string(1)!, title: pick(.title, tagged ? title : nil, inferred: title) ?? "",
                             album: pick(.album, r.string(3)), albumArtist: pick(.albumArtist, r.string(4)),
                             artists: names(.artists, credited?.artists ?? []),
@@ -427,7 +459,8 @@ public actor LibraryStore {
                             coverFile: (layer[.cover]?[.user] ?? online(.cover)).map { covers.appending(path: $0).path },
                             userCover: layer[.cover]?[.user] != nil,
                             inferred: Set([(EnrichField.title, tagged || r.string(2) == nil), (.trackNo, trackTagged || r.int(5) == nil)]
-                                .filter { field, known in !known && layer[field]?[.user] == nil && online(field) == nil }.map(\.0)))
+                                .filter { field, known in !known && layer[field]?[.user] == nil && online(field) == nil }.map(\.0)),
+                            unwritten: unwritten)
         }
     }
 }
