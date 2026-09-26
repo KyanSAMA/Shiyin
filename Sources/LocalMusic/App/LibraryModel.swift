@@ -110,8 +110,14 @@ import LocalMusicCore
         await reloadAfterWrites()
     }
 
+    /// Also deletes the manual covers' files.
     func revertUserEdits(_ fingerprints: [String]) async {
-        write { try await $0.clearEnrichment(fingerprints, source: .user) }
+        write { store in
+            var covers: [String] = []
+            for fingerprint in fingerprints { if let cover = try await store.enrichment(fingerprint, source: .user)[.cover] { covers.append(cover) } }
+            try await store.clearEnrichment(fingerprints, source: .user)
+            for cover in covers { try? FileManager.default.removeItem(at: store.coversDirectory.appending(path: cover)) }
+        }
         await reloadAfterWrites()
     }
 

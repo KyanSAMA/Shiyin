@@ -174,18 +174,55 @@ final class SelfTestRunner {
             model.deletePlaylist(try playlist(step.required("name")).id)
             try await settle()
         case "editInfo":
-            // Through the sheet: open it, fill `fields` (EnrichField names), then save unless `keepOpen`.
+            // Through the sheet (资料对照 for one song, after its search): open it, fill `fields` (EnrichField names),
+            // then save unless `keepOpen`.
             let index = try library().index
             await model.editInfo(try trackIDs(step).compactMap { index.tracks[$0] })
-            guard let editor = model.ui.infoEditor else { throw SelfTestFailure(description: "no editor") }
+            await model.ui.compare?.search?.value
+            guard let editor = model.ui.compare?.editor ?? model.ui.infoEditor else { throw SelfTestFailure(description: "no editor") }
             for (key, value) in step["fields"] as? [String: String] ?? [:] {
                 guard let field = EnrichField(rawValue: key) else { throw SelfTestFailure(description: "unknown field \(key)") }
                 editor.texts[field] = value
             }
-            if step["keepOpen"] as? Bool != true { await model.saveInfo(editor) }
+            if step["keepOpen"] as? Bool != true { try await saveSheet() }
+            try await settle()
+        case "compareSearch":
+            let compare = try openCompare()
+            compare.keywords = try step.required("keywords")
+            model.enrich?.startSearch(compare)
+            await compare.search?.value
+            try await settle()
+        case "pickResult", "adopt":
+            // A source's result by `index`; `adopt` then takes its `field` (an EnrichField name), or all of it.
+            let compare = try openCompare()
+            guard let source = OnlineSource(rawValue: try step.required("source")) else { throw SelfTestFailure(description: "unknown source") }
+            if let index = step.number("index") { compare.picked[source] = Int(index) }
+            guard let song = compare.song(source), let enrich = model.enrich else { throw SelfTestFailure(description: "no result") }
+            await enrich.loadDetails(song, for: compare)
+            await enrich.loadThumbnail(song)
+            if step.string("do") == "adopt" {
+                switch step.string("field") {
+                case nil: compare.adopt(song)
+                case "cover":
+                    compare.cover = .song(song)
+                    compare.tookOnline = true
+                case "lyrics":
+                    compare.lyricsChoice = .song(song)
+                    compare.tookOnline = true
+                case let name?:
+                    guard let field = EnrichField(rawValue: name), let value = compare.value(field, of: song) else {
+                        throw SelfTestFailure(description: "no \(name)")
+                    }
+                    compare.take(value, for: field)
+                }
+            }
+            try await settle()
+        case "saveEditInfo":
+            try await saveSheet()
             try await settle()
         case "closeEditInfo":
             model.ui.infoEditor = nil
+            model.ui.compare = nil
             try await settle()
         case "revertInfo":
             let index = try library().index
@@ -198,25 +235,13 @@ final class SelfTestRunner {
             if step["titles"] != nil { enrich.enrich(try trackIDs(step).compactMap { index.tracks[$0] }) } else { await enrich.enrichAll(index.songs) }
             await enrich.finish()
             try await settle()
-        case "openCandidates", "chooseCandidate", "rejectMatch":
-            // Through the same model calls as the 选择匹配 sheet's buttons.
+        case "rejectMatch":
             let title = try step.required("title")
             guard let enrich = model.enrich, let row = try library().index.songs.first(where: { $0.title == title }) else {
                 throw SelfTestFailure(description: "no song \(title)")
             }
-            let candidates = enrich.match(row)?.candidates ?? []
-            if step.string("do") == "openCandidates" {
-                model.ui.candidatesFor = (row, candidates)
-            } else {
-                model.ui.candidatesFor = nil
-                if step.string("do") == "rejectMatch" {
-                    await enrich.reject(row)
-                } else if let song = candidates.dropFirst(Int(step.number("index") ?? 0)).first {
-                    await enrich.choose(song, for: row)
-                } else {
-                    throw SelfTestFailure(description: "no candidate")
-                }
-            }
+            model.ui.compare = nil
+            await enrich.reject(row)
             try await settle()
         case "setSources":
             // `order` / `disabled` (source names), `storefront`; what's not given stays.
@@ -421,6 +446,45 @@ final class SelfTestRunner {
             guard let song = songs.first(where: { $0.title == title }) else { throw SelfTestFailure(description: "no song \(title)") }
             return song.id
         }
+    }
+
+    private func openCompare() throws -> SourceCompare {
+        guard let compare = model.ui.compare else { throw SelfTestFailure(description: "no 资料对照 sheet") }
+        return compare
+    }
+
+    /// As the sheet's 保存 button.
+    private func saveSheet() async throws {
+        if let compare = model.ui.compare, let enrich = model.enrich {
+            model.ui.compare = nil
+            await enrich.save(compare)
+        } else if let editor = model.ui.infoEditor {
+            await model.saveInfo(editor)
+        } else {
+            throw SelfTestFailure(description: "no edit sheet")
+        }
+    }
+
+    /// The open 资料对照 sheet.
+    private func compareState(_ compare: SourceCompare) -> Step {
+        func describe(_ choice: String?) -> Any { choice ?? NSNull() }
+        let cover: String? = switch compare.cover {
+        case .song(let song)?: song.key
+        case .file(let url, _)?: url.lastPathComponent
+        case .removed?: "removed"
+        case nil: nil
+        }
+        let lyrics: String? = switch compare.lyricsChoice {
+        case .song(let song)?: song.key
+        case .text?: "text"
+        case .removed?: "removed"
+        case nil: nil
+        }
+        return ["keywords": compare.keywords, "searching": compare.searching,
+                "results": Dictionary(uniqueKeysWithValues: compare.results.map { ($0.key.rawValue, $0.value.map(\.title)) }),
+                "picked": Dictionary(uniqueKeysWithValues: compare.sources.map { ($0.rawValue, compare.song($0)?.key ?? "") }),
+                "texts": Dictionary(uniqueKeysWithValues: compare.editor.fields.compactMap { field in compare.editor.texts[field].map { (field.rawValue, $0) } }),
+                "cover": describe(cover), "lyrics": describe(lyrics)]
     }
 
     private func enrichState(_ enrich: EnrichModel) -> Step {
@@ -643,6 +707,7 @@ final class SelfTestRunner {
             "measure": measures,
             "inspected": inspected,
             "enrich": model.enrich.map(enrichState) ?? NSNull(),
+            "compare": model.ui.compare.map(compareState) ?? NSNull(),
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],

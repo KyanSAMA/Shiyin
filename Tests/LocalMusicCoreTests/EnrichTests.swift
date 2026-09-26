@@ -170,7 +170,7 @@ struct OnlineTests {
         #expect(try await client.lyrics(lrclib[0]) == "[00:01.49]嗚呼")
     }
 
-    @Test func asksSourcesWhileTheyCanFillGapsAndAPickReplacesEveryLayer() async throws {
+    @Test func asksSourcesWhileTheyCanFillGapsAndReplacesEveryLayer() async throws {
         let lib = try TempLibrary()
         try lib.flac("Tone.flac", ["TITLE=Tone", "ARTIST=Tester"])
         try lib.flac("Broken.flac", ["TITLE=Broken", "ARTIST=Tester"])
@@ -189,13 +189,15 @@ struct OnlineTests {
         #expect(row.year == 2020 && row.album == "Tones" && row.genre == "Pop" && row.hasLyrics && row.coverFile != nil)
         let qqCover = try #require(try await lib.store.enrichment(tone.fingerprint, source: .online(.qq))[.cover])
 
-        try await service.apply(songs[1], to: tone, status: .confirmed)
+        // Without QQ, iTunes knows the song; the QQ and LRCLIB layers from the last lookup go.
+        let itunesOnly = EnrichJob(fingerprint: tone.fingerprint, trackID: tone.trackID, query: tone.query, songID: nil, needsLyrics: false,
+                                   needsCover: true, sources: [.itunes], storefront: "jp")
+        #expect(await service.enrich(itunesOnly) == .applied([songs[1]]))
         #expect(try await lib.store.enrichment(tone.fingerprint, source: .online(.qq)).isEmpty)
         #expect(try await lib.store.enrichment(tone.fingerprint, source: .online(.lrclib)).isEmpty)
         #expect(!FileManager.default.fileExists(atPath: lib.store.coversDirectory.appending(path: qqCover).path))
         row = try #require(try await lib.store.rows([tone.trackID]).first)
         #expect(row.year == 2021 && row.genre == "Pop" && !row.hasLyrics && row.coverFile != nil)
-        #expect(try await lib.store.matches(tone.fingerprint)[tone.fingerprint]?.status == .confirmed)
 
         // One source failing while the others find nothing is "not found", not a failure.
         #expect(await service.enrich(try await job("Broken")) == .notFound)

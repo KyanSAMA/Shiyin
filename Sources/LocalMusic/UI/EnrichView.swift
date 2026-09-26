@@ -43,12 +43,10 @@ struct EnrichView: View {
                     .frame(maxHeight: .infinity)
             } else {
                 List(rows, selection: $ui.enrichSelection) { row in
-                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row)) { choose(row) }
+                    EnrichRow(store: model.artwork, row: row, match: enrich.match(row)) { compare(row) }
                         .contextMenu {
                             Button("重新查找") { enrich.enrich([row]) }
-                            if let match = enrich.match(row), match.status != .pending, !match.candidates.isEmpty {
-                                Button("选择其他匹配…") { choose(row) }
-                            }
+                            Button("资料对照…") { compare(row) }
                             if enrich.match(row).map({ $0.status != .rejected }) ?? false {
                                 Button("清除补全并不再查找") { Task { await enrich.reject(row) } }
                             }
@@ -59,8 +57,8 @@ struct EnrichView: View {
         }
     }
 
-    private func choose(_ row: TrackRow) {
-        model.ui.candidatesFor = (row, enrich.match(row)?.candidates ?? [])
+    private func compare(_ row: TrackRow) {
+        Task { await model.editInfo([row]) }
     }
 
     @ViewBuilder private func actions(rows: [TrackRow]) -> some View {

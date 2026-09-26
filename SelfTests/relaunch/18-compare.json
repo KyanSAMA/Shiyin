@@ -1,0 +1,21 @@
+{
+  "timeout": 60,
+  "window": { "width": 1440, "height": 900 },
+  "steps": [
+    { "do": "startLibrary" },
+    { "do": "waitUntil", "path": "library.scanning", "equals": false, "timeout": 10 },
+    { "do": "inspect", "title": "春日影" },
+    { "do": "assert", "path": "inspected.春日影.genre", "equals": "Anime" },
+    { "do": "assert", "path": "inspected.春日影.year", "equals": 2024 },
+    { "do": "assert", "path": "inspected.春日影.coverFile", "equals": true },
+    { "do": "play", "title": "春日影" },
+    { "do": "pause" },
+    { "do": "showNowPlaying" },
+    { "do": "waitUntil", "path": "lyrics.lineCount", "equals": 4, "timeout": 5 },
+    { "do": "revertInfo", "titles": ["春日影"] },
+    { "do": "inspect", "title": "春日影" },
+    { "do": "assert", "path": "inspected.春日影.genre", "equals": null },
+    { "do": "assert", "path": "inspected.春日影.year", "equals": null },
+    { "do": "assert", "path": "inspected.春日影.coverFile", "equals": false }
+  ]
+}

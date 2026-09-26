@@ -120,13 +120,13 @@ enum Route: Hashable {
     var playlistPrompt: PlaylistPrompt?
     var playlistName = ""
     var deletingPlaylist: Int64?
+    /// The batch edit sheet; one song gets the 资料对照 sheet (`compare`).
     var infoEditor: InfoEditor?
+    var compare: SourceCompare?
     var enrichFilter = EnrichFilter.missingLyrics
     /// 0 曲库, 1 在线资料.
     var settingsTab = 0
     var enrichSelection: Set<Int64> = []
-    /// The song whose online candidates are being chosen from, with the candidates as they were when the sheet opened.
-    var candidatesFor: (row: TrackRow, candidates: [OnlineSong])?
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?
     @ObservationIgnored private var sortedMemo: (index: UUID, sort: [KeyPathComparator<TrackRow>], rows: [TrackRow])?

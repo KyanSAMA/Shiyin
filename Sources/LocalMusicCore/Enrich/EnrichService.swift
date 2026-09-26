@@ -57,17 +57,9 @@ public actor EnrichService {
 
     /// Asks the sources in order, each only while it can fill a gap the file still has; LRCLIB only supplements a song
     /// another source knows. The matches replace every online layer. A song already applied keeps its data when a new
-    /// lookup is inconclusive (the candidates are kept for choosing).
+    /// lookup is inconclusive.
     public func enrich(_ job: EnrichJob) async -> EnrichOutcome {
         do { return try await serial { await self.lookUp(job) } } catch { return .failed(String(describing: error)) }
-    }
-
-    /// The user's pick: replaces every online layer, since the others may come from a wrong match.
-    public func apply(_ song: OnlineSong, to job: EnrichJob, status: MatchStatus) async throws {
-        try await serial {
-            var gaps = try await self.gaps(job)
-            try await self.save(job.fingerprint, [song.source: try await self.values(song, job, gaps: &gaps)], status)
-        }
     }
 
     /// None of the candidates (or the applied songs) is right: remove what the online sources supplied and don't look
@@ -79,8 +71,43 @@ public actor EnrichService {
         }
     }
 
-    /// A candidate's cover for the picker (not paced: image CDNs, not the APIs).
+    /// A result's cover for the 资料对照 sheet (not paced: image CDNs, not the APIs).
     public func thumbnail(_ song: OnlineSong) async throws -> Data? { try await client.cover(song, pixels: 100) }
+
+    /// For the 资料对照 sheet: a search with the user's keywords.
+    public func search(_ source: OnlineSource, _ keywords: String, storefront: String) async throws -> [OnlineSong] {
+        try await paced(source) { try await self.client.search(source, keywords, storefront: storefront) }
+    }
+
+    /// The album's release year from the song's detail, which NetEase search results often lack.
+    public func neteaseYear(_ song: OnlineSong) async throws -> Int? {
+        guard let id = Int64(song.id) else { return nil }
+        return try await paced(.netease) { try await self.client.neteaseSong(id) }?.year
+    }
+
+    /// LRCLIB's lyrics come with the song and iTunes has none: no request to pace.
+    public func lyrics(_ song: OnlineSong) async throws -> String? {
+        song.source == .netease || song.source == .qq ? try await paced(song.source) { try await self.client.lyrics(song) } : try await client.lyrics(song)
+    }
+
+    /// A cover picked for a manual edit, from a song or an image file; returns its name in the covers directory.
+    public func saveCover(_ source: CoverSource, fingerprint: String) async throws -> String? {
+        let (data, type): (Data?, String) = switch source {
+        case .song(let song): (try await paced(song.source) { try await self.client.cover(song) }, "jpg")
+        case .file(let url): (try Data(contentsOf: url), url.pathExtension.lowercased())
+        }
+        guard let data else { return nil }
+        let covers = store.coversDirectory
+        let name = "\(fingerprint.replacing(":", with: "-"))-user-\(Int(Date().timeIntervalSince1970 * 1000)).\(type)"
+        try FileManager.default.createDirectory(at: covers, withIntermediateDirectories: true)
+        try data.write(to: covers.appending(path: name))
+        return name
+    }
+
+    public enum CoverSource: Sendable {
+        case song(OnlineSong)
+        case file(URL)
+    }
 
     private func serial<T: Sendable>(_ body: @escaping @Sendable () async throws -> T) async throws -> T {
         let previous = tail
@@ -162,15 +189,10 @@ public actor EnrichService {
             values[.discNo] = song.discNo.map(String.init)
             values[.genre] = song.genre
             var year = song.year
-            if year == nil, gaps.contains(.year), song.source == .netease, job.songID == nil, let id = Int64(song.id) {
-                year = (try? await paced(.netease) { try await self.client.neteaseSong(id) })??.year
-            }
+            if year == nil, gaps.contains(.year), song.source == .netease, job.songID == nil { year = try? await neteaseYear(song) }
             values[.year] = year.map(String.init)
         }
-        // LRCLIB's lyrics come with the song and iTunes has none: no request to pace.
-        let fetchesLyrics = song.source == .netease || song.source == .qq
-        if gaps.contains(.lyrics),
-           let lyrics = fetchesLyrics ? try await paced(song.source, { try await self.client.lyrics(song) }) : try await client.lyrics(song) {
+        if gaps.contains(.lyrics), let lyrics = try await self.lyrics(song) {
             values[.lyrics] = lyrics
             if let composers = LRCParser.parse(lyrics)?.credits.composers, !composers.isEmpty { values[.composers] = EnrichField.encode(composers) }
         }

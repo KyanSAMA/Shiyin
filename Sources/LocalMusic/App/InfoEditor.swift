@@ -97,15 +97,6 @@ extension TrackRow {
 }
 
 extension AppModel {
-    /// Songs without a fingerprint (unreadable audio) can't carry edits.
-    func editInfo(_ rows: [TrackRow]) async {
-        let rows = rows.filter { $0.fingerprint != nil }
-        guard let library, let first = rows.first?.fingerprint else { return }
-        let single = rows.count == 1
-        ui.infoEditor = InfoEditor(tracks: rows, edits: single ? await library.userEdits(first) : [:],
-                                   unedited: single ? await library.uneditedRows([rows[0].id]) : [])
-    }
-
     func saveInfo(_ editor: InfoEditor) async {
         ui.infoEditor = nil
         await library?.setUserEdits(editor.tracks.compactMap(\.fingerprint), editor.changes)
@@ -113,6 +104,7 @@ extension AppModel {
 
     func revertInfo(_ rows: [TrackRow]) async {
         ui.infoEditor = nil
+        ui.compare = nil
         await library?.revertUserEdits(rows.compactMap(\.fingerprint))
     }
 }
