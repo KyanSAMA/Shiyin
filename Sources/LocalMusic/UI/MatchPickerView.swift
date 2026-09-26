@@ -23,6 +23,9 @@ struct MatchPickerView: View {
         }
         .frame(width: 780, height: 540)
         .onAppear { listFocused = true }
+        .sheet(isPresented: Binding(get: { picker.lyricsChooser != nil }, set: { if !$0 { picker.lyricsChooser = nil } })) {
+            if let chooser = picker.lyricsChooser { LyricsChooserView(enrich: enrich, chooser: chooser) { picker.lyricsChooser = nil } }
+        }
         // The list only exists with results: focus it once they arrive.
         .onChange(of: picker.results.isEmpty) { _, empty in if !empty { listFocused = true } }
         .onDisappear {
@@ -127,15 +130,16 @@ private struct SourceStatusLine: View {
     let picker: MatchPicker
 
     var body: some View {
-        let parts = picker.sources.map { source -> Text in
+        let sources = picker.sources + (picker.searchesLyrics ? [.lrclib] : [])
+        let parts = sources.map { source -> Text in
             switch picker.status[source] {
             case .searching?: Text("\(source.title) 搜索中…")
-            case .found(let count)?: Text("\(source.title) \(count)")
+            case .found(let count)?: Text(source == .lrclib ? "LRCLIB \(count) 份歌词" : "\(source.title) \(count)")
             case .failed?: Text("\(source.title) 请求失败").foregroundStyle(Color.orange)
             case nil: Text("")
             }
         }
-        let failures = picker.sources.compactMap { source in
+        let failures = sources.compactMap { source in
             if case .failed(let error)? = picker.status[source] { "\(source.title)：\(error)" } else { nil }
         }
         parts.dropFirst().reduce(parts.first ?? Text("")) { Text("\($0)    \($1)") }
@@ -186,7 +190,7 @@ private struct MatchDetail: View {
         }
         let ownCover = base.hasArtwork || ArtworkCache.hasFolderImage(near: base)
         let replaceable = rows.filter { !$0.current.isEmpty && $0.current != $0.value }.map(\.field)
-            + (ownCover && song.coverURL != nil ? [.cover] : []) + (base.hasLyrics && lyrics != nil ? [.lyrics] : [])
+            + (ownCover && song.coverURL != nil ? [.cover] : []) + (base.hasLyrics && lyrics != nil && picker.chosenLyrics == nil ? [.lyrics] : [])
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
@@ -234,12 +238,19 @@ private struct MatchDetail: View {
                         }
                     }
                     GridRow {
-                        mark(base.hasLyrics ? (picker.replace.contains(.lyrics) ? .replaces : .kept) : lyrics == nil ? .none : .fills)
+                        mark(picker.chosenLyrics != nil ? .replaces
+                             : base.hasLyrics ? (picker.replace.contains(.lyrics) ? .replaces : .kept) : lyrics == nil ? .none : .fills)
                         Text("歌词").foregroundStyle(.secondary)
-                        Text(picker.lyrics[song.key] == nil ? "载入中…"
-                             : !base.hasLyrics ? lyrics.map { "补上" + summary($0) } ?? "没有歌词，采用后再从其他来源找"
-                             : picker.replace.contains(.lyrics) ? lyrics.map { "替换为" + summary($0) } ?? ""
-                             : "保留现有的歌词" + (lyrics.map { "（这首有" + summary($0) + "）" } ?? ""))
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(picker.chosenLyrics.map { chosen in
+                                    "用\(chosen.song.source.title)的歌词" + (LRCParser.parse(chosen.text).map { "（" + summary($0).trimmingCharacters(in: .whitespaces) + "）" } ?? "")
+                                 }
+                                 ?? (picker.lyrics[song.key] == nil ? "载入中…"
+                                     : !base.hasLyrics ? lyrics.map { "补上" + summary($0) } ?? "没有歌词，采用后再从其他来源找"
+                                     : picker.replace.contains(.lyrics) ? lyrics.map { "替换为" + summary($0) } ?? ""
+                                     : "保留现有的歌词" + (lyrics.map { "（这首有" + summary($0) + "）" } ?? "")))
+                            if !enrich.lyricsSources.isEmpty { Button("更换…") { enrich.chooseLyrics(for: picker) }.controlSize(.small) }
+                        }
                         replaceToggle(.lyrics, shown: replaceable.contains(.lyrics))
                     }
                 }
@@ -292,7 +303,7 @@ private struct MatchDetail: View {
     }
 }
 
-private struct DurationDelta: View {
+struct DurationDelta: View {
     let song: OnlineSong
     let duration: Double
 

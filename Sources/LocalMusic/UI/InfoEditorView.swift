@@ -45,6 +45,11 @@ struct InfoEditorView: View {
             .padding(20)
         }
         .frame(width: single == nil ? 440 : 500, height: single == nil ? nil : 540)
+        .sheet(isPresented: Binding(get: { editor.lyricsChooser != nil }, set: { if !$0 { editor.lyricsChooser = nil } })) {
+            if let chooser = editor.lyricsChooser, let enrich = model.enrich {
+                LyricsChooserView(enrich: enrich, chooser: chooser) { editor.lyricsChooser = nil }
+            }
+        }
     }
 
     private func header(_ row: TrackRow) -> some View {
@@ -128,25 +133,27 @@ struct InfoEditorView: View {
         case .image?, nil: editor.edits[.lyrics] != nil ? "手动设置的歌词" : row.hasLyrics ? "有歌词" : "没有歌词"
         }
         return LabeledContent("歌词") {
-            HStack(spacing: 10) {
+            VStack(alignment: .trailing, spacing: 6) {
                 Text(state).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                let options = editor.suggestions(.lyrics)
-                if !options.isEmpty {
-                    Menu("在线来源") {
-                        ForEach(options, id: \.source) { option in Button(option.source.title) { editor.lyrics = .text(option.value) } }
+                HStack(spacing: 8) {
+                    if model.enrich?.lyricsSources.isEmpty == false { Button("搜索歌词…") { model.chooseLyrics(for: editor) } }
+                    let options = editor.suggestions(.lyrics)
+                    if !options.isEmpty {
+                        Menu("在线来源") {
+                            ForEach(options, id: \.source) { option in Button(option.source.title) { editor.lyrics = .text(option.value) } }
+                        }
+                        .fixedSize()
                     }
-                    .fixedSize()
-                }
-                Button("导入 .lrc…") {
-                    let panel = NSOpenPanel()
-                    panel.allowedContentTypes = [UTType(filenameExtension: "lrc") ?? .plainText, .plainText]
-                    if panel.runModal() == .OK, let url = panel.url, let text = try? String(contentsOf: url, encoding: .utf8) {
-                        editor.lyrics = .text(text)
+                    Button("导入 .lrc…") {
+                        let panel = NSOpenPanel()
+                        panel.allowedContentTypes = [UTType(filenameExtension: "lrc") ?? .plainText, .plainText]
+                        if panel.runModal() == .OK, let url = panel.url, let text = try? String(contentsOf: url, encoding: .utf8) {
+                            editor.lyrics = .text(text)
+                        }
                     }
+                    Button("粘贴") { if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty { editor.lyrics = .text(text) } }
+                    if editor.edits[.lyrics] != nil { Button("移除") { editor.lyrics = .removed } }
                 }
-                Button("粘贴") { if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty { editor.lyrics = .text(text) } }
-                if editor.edits[.lyrics] != nil { Button("移除") { editor.lyrics = .removed } }
             }
         }
     }

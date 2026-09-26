@@ -1,33 +1,266 @@
 {
   "timeout": 60,
-  "window": { "width": 1440, "height": 900 },
+  "window": {
+    "width": 1440,
+    "height": 900
+  },
   "steps": [
-    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
-    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
-    { "do": "chooseMatch", "title": "群青" },
-    { "do": "assert", "path": "picker.results", "contains": "netease:1472480890" },
-    { "do": "selectMatch", "key": "netease:1472480890", "replace": ["album", "year", "cover"] },
-    { "do": "assert", "path": "picker.replace", "equals": ["album", "cover", "year"] },
-    { "do": "wait", "seconds": 1 },
-    { "do": "snapshot", "name": "replace", "window": "sheet" },
-    { "do": "selectMatch", "key": "netease:1500151581" },
-    { "do": "assert", "path": "picker.replace", "equals": [] },
-    { "do": "adoptMatch", "key": "netease:1472480890", "replace": ["album", "year", "cover"] },
-    { "do": "inspect", "title": "群青" },
-    { "do": "assert", "path": "inspected.群青.match", "equals": "confirmed" },
-    { "do": "assert", "path": "inspected.群青.album", "equals": "群青" },
-    { "do": "assert", "path": "inspected.群青.year", "equals": 2020 },
-    { "do": "assert", "path": "inspected.群青.trackNo", "equals": 2 },
-    { "do": "assert", "path": "inspected.群青.userCover", "equals": true },
-    { "do": "editInfo", "titles": ["群青"], "keepOpen": true },
-    { "do": "assert", "path": "editor.texts.album", "equals": "群青" },
-    { "do": "assert", "path": "editor.texts.year", "equals": "2020" },
-    { "do": "closeEditInfo" },
-    { "do": "revertInfo", "titles": ["群青"] },
-    { "do": "inspect", "title": "群青" },
-    { "do": "assert", "path": "inspected.群青.album", "equals": "THE BOOK" },
-    { "do": "assert", "path": "inspected.群青.year", "equals": 2021 },
-    { "do": "assert", "path": "inspected.群青.userCover", "equals": false },
-    { "do": "quit" }
+    {
+      "do": "fs",
+      "op": "copy",
+      "from": "@fixtures/library",
+      "to": "@out/lib"
+    },
+    {
+      "do": "startLibrary",
+      "include": [
+        "@out/lib"
+      ],
+      "exclude": [
+        "@out/lib/Music"
+      ]
+    },
+    {
+      "do": "chooseMatch",
+      "title": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "picker.results",
+      "contains": "netease:1472480890"
+    },
+    {
+      "do": "selectMatch",
+      "key": "netease:1472480890",
+      "replace": [
+        "album",
+        "year",
+        "cover"
+      ]
+    },
+    {
+      "do": "assert",
+      "path": "picker.replace",
+      "equals": [
+        "album",
+        "cover",
+        "year"
+      ]
+    },
+    {
+      "do": "wait",
+      "seconds": 1
+    },
+    {
+      "do": "snapshot",
+      "name": "replace",
+      "window": "sheet"
+    },
+    {
+      "do": "selectMatch",
+      "key": "netease:1500151581"
+    },
+    {
+      "do": "assert",
+      "path": "picker.replace",
+      "equals": []
+    },
+    {
+      "do": "adoptMatch",
+      "key": "netease:1472480890",
+      "replace": [
+        "album",
+        "year",
+        "cover"
+      ]
+    },
+    {
+      "do": "inspect",
+      "title": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.match",
+      "equals": "confirmed"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.album",
+      "equals": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.year",
+      "equals": 2020
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.trackNo",
+      "equals": 2
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.userCover",
+      "equals": true
+    },
+    {
+      "do": "editInfo",
+      "titles": [
+        "群青"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "editor.texts.album",
+      "equals": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "editor.texts.year",
+      "equals": "2020"
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "revertInfo",
+      "titles": [
+        "群青"
+      ]
+    },
+    {
+      "do": "inspect",
+      "title": "群青"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.album",
+      "equals": "THE BOOK"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.year",
+      "equals": 2021
+    },
+    {
+      "do": "assert",
+      "path": "inspected.群青.userCover",
+      "equals": false
+    },
+    {
+      "do": "chooseMatch",
+      "title": "直到大地变成一颗酸橙"
+    },
+    {
+      "do": "assert",
+      "path": "picker.lyricsResults",
+      "equals": [
+        "lrclib:9001"
+      ]
+    },
+    {
+      "do": "assert",
+      "path": "picker.status.lrclib",
+      "equals": 1
+    },
+    {
+      "do": "chooseLyrics",
+      "key": "lrclib:9001",
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "lyricsChooser.options",
+      "contains": "lrclib:9001"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.8
+    },
+    {
+      "do": "snapshot",
+      "name": "lyrics-chooser",
+      "window": "sheet"
+    },
+    {
+      "do": "chooseLyrics",
+      "key": "lrclib:9001"
+    },
+    {
+      "do": "assert",
+      "path": "picker.lyrics",
+      "equals": "lrclib:9001"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.5
+    },
+    {
+      "do": "snapshot",
+      "name": "chosen-lyrics",
+      "window": "sheet"
+    },
+    {
+      "do": "adoptMatch",
+      "key": "qq:000qqFixture01"
+    },
+    {
+      "do": "inspect",
+      "title": "直到大地变成一颗酸橙"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.直到大地变成一颗酸橙.hasLyrics",
+      "equals": true
+    },
+    {
+      "do": "editInfo",
+      "titles": [
+        "直到大地变成一颗酸橙"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "assert",
+      "path": "editor.edited",
+      "equals": [
+        "lyrics"
+      ]
+    },
+    {
+      "do": "closeEditInfo"
+    },
+    {
+      "do": "editInfo",
+      "titles": [
+        "春日影"
+      ],
+      "keepOpen": true
+    },
+    {
+      "do": "chooseLyrics",
+      "key": "netease:2001"
+    },
+    {
+      "do": "assert",
+      "path": "editor.lyrics",
+      "contains": "悴んだ心"
+    },
+    {
+      "do": "saveEditInfo"
+    },
+    {
+      "do": "inspect",
+      "title": "春日影"
+    },
+    {
+      "do": "assert",
+      "path": "inspected.春日影.hasLyrics",
+      "equals": true
+    },
+    {
+      "do": "quit"
+    }
   ]
 }

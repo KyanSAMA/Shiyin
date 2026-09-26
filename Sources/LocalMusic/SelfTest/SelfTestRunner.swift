@@ -223,6 +223,29 @@ final class SelfTestRunner {
             model.ui.sheet = nil
             await enrich.choose(song, for: picker)
             try await settle()
+        case "chooseLyrics":
+            // 选择歌词 from the open 选择匹配 or 编辑信息 sheet: waits for its search, selects `key` (or `keep`), then uses it
+            // unless `keepOpen`.
+            guard let enrich = model.enrich else { throw SelfTestFailure(description: "no enrichment") }
+            let picker = model.ui.sheet?.picker, editor = model.ui.sheet?.editor
+            if let picker, picker.lyricsChooser == nil { enrich.chooseLyrics(for: picker) }
+            if let editor, editor.lyricsChooser == nil { model.chooseLyrics(for: editor) }
+            guard let chooser = picker?.lyricsChooser ?? editor?.lyricsChooser else { throw SelfTestFailure(description: "no lyrics chooser") }
+            await chooser.search?.value
+            if step["keep"] as? Bool == true {
+                chooser.selection = nil
+            } else {
+                let key = try step.required("key")
+                guard let song = chooser.options.first(where: { $0.key == key }) else { throw SelfTestFailure(description: "no option \(key)") }
+                chooser.selection = key
+                await enrich.loadLyrics(song, for: chooser)
+            }
+            if step["keepOpen"] as? Bool != true {
+                chooser.use()
+                picker?.lyricsChooser = nil
+                editor?.lyricsChooser = nil
+            }
+            try await settle()
         case "saveEditInfo":
             guard let editor = model.ui.sheet?.editor else { throw SelfTestFailure(description: "no edit sheet") }
             await model.saveInfo(editor)
@@ -465,6 +488,7 @@ final class SelfTestRunner {
     private func pickerState(_ picker: MatchPicker) -> Step {
         ["keywords": picker.keywords, "searching": picker.searching, "stored": picker.status.isEmpty,
          "results": picker.results.map(\.key), "selected": picker.selection ?? NSNull(), "replace": picker.replace.map(\.rawValue).sorted(),
+         "lyrics": picker.chosenLyrics?.song.key ?? NSNull(), "lyricsResults": picker.lyricsResults.map(\.key),
          "status": Dictionary(uniqueKeysWithValues: picker.status.map { source, status in
              (source.rawValue, { () -> Any in
                  switch status {
@@ -486,7 +510,8 @@ final class SelfTestRunner {
             }
         }
         return ["texts": Dictionary(uniqueKeysWithValues: editor.texts.map { ($0.key.rawValue, $0.value) }),
-                "sources": editor.layers.map(\.source.rawValue), "cover": describe(editor.cover), "lyrics": describe(editor.lyrics)]
+                "sources": editor.layers.map(\.source.rawValue), "cover": describe(editor.cover), "lyrics": describe(editor.lyrics),
+                "edited": editor.edits.keys.map(\.rawValue).sorted()]
     }
 
     private func enrichState(_ enrich: EnrichModel) -> Step {
@@ -628,7 +653,9 @@ final class SelfTestRunner {
     }
 
     private func window(_ name: String = "main") throws -> NSWindow {
-        let window = name == "main" ? mainWindow : name == "sheet" ? mainWindow?.attachedSheet : NSApp.windows.first {
+        // "sheet": the innermost one (a sheet can present its own).
+        let window = name == "main" ? mainWindow : name == "sheet" ? mainWindow?.attachedSheet.map { sequence(first: $0) { $0.attachedSheet }.reduce($0) { $1 } }
+            : NSApp.windows.first {
             $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || name == "settings" && $0.title.contains("设置"))
         }
         guard let window else { throw SelfTestFailure(description: "\(name) window not found") }
@@ -711,6 +738,10 @@ final class SelfTestRunner {
             "enrich": model.enrich.map(enrichState) ?? NSNull(),
             "picker": model.ui.sheet?.picker.map(pickerState) ?? NSNull(),
             "editor": model.ui.sheet?.editor.map(editorState) ?? NSNull(),
+            "lyricsChooser": (model.ui.sheet?.picker?.lyricsChooser ?? model.ui.sheet?.editor?.lyricsChooser).map { chooser in
+                ["keywords": chooser.keywords, "options": chooser.options.map(\.key), "selection": chooser.selection ?? NSNull(),
+                 "searching": chooser.searching] as Step
+            } ?? NSNull(),
             "nowPlayingInfo": nowPlayingState(),
             "snapshots": snapshots,
             "perf": ["maxMainThreadStallMs": perf.maxMs, "stallsOver50ms": perf.over50ms],

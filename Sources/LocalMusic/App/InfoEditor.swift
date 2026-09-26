@@ -22,6 +22,7 @@ import LocalMusicCore
     let layers: [(source: OnlineSource, values: [EnrichField: String])]
     var cover: Choice?
     var lyrics: Choice?
+    var lyricsChooser: LyricsChooser?
 
     init(tracks: [TrackRow], edits: [EnrichField: String], unedited: [TrackRow], layers: [(source: OnlineSource, values: [EnrichField: String])] = []) {
         self.tracks = tracks

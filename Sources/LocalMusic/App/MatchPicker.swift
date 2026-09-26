@@ -12,13 +12,24 @@ import LocalMusicCore
     let row: TrackRow
     /// The song without online layers: what a pick fills and what it leaves alone.
     let baseline: TrackRow
-    /// The sources it can search (LRCLIB can't tell songs apart), in order.
+    /// The sources it can search (LRCLIB can't tell songs apart, so it's only searched for lyrics), in order.
     let sources: [OnlineSource]
+    let searchesLyrics: Bool
+    /// LRCLIB's results for the keywords: lyrics to choose from, not candidates.
+    fileprivate(set) var lyricsResults: [OnlineSong] = []
+    /// Lyrics chosen from any source (as manual edits); cleared with the selection.
+    var chosenLyrics: (song: OnlineSong, text: String)?
+    var lyricsChooser: LyricsChooser?
     var keywords: String
     fileprivate(set) var results: [OnlineSong]
     /// The selected result's key; choosing another clears `replace`.
     var selection: String? {
-        didSet { if selection != oldValue { replace = [] } }
+        didSet {
+            if selection != oldValue {
+                replace = []
+                chosenLyrics = nil
+            }
+        }
     }
     /// What the pick replaces in the file (as manual edits) rather than only filling gaps.
     var replace: Set<EnrichField> = []
@@ -36,6 +47,7 @@ import LocalMusicCore
 
     init(row: TrackRow, baseline: TrackRow, sources: [OnlineSource], candidates: [OnlineSong]) {
         (self.row, self.baseline, self.sources, results) = (row, baseline, sources.filter { $0 != .lrclib }, candidates)
+        searchesLyrics = sources.contains(.lrclib)
         keywords = MatchQuery(title: row.title, artists: row.artists, album: row.album, duration: row.duration).keywords
         selection = candidates.first?.key
     }
@@ -47,13 +59,18 @@ import LocalMusicCore
     fileprivate func begin() {
         results = []
         found = [:]
+        lyricsResults = []
         selection = nil
         touched = false
-        status = Dictionary(uniqueKeysWithValues: sources.map { ($0, .searching) })
+        status = Dictionary(uniqueKeysWithValues: (sources + (searchesLyrics ? [.lrclib] : [])).map { ($0, .searching) })
     }
 
     fileprivate func arrive(_ source: OnlineSource, _ songs: [OnlineSong]?, failure: String?) {
         status[source] = failure.map(SourceStatus.failed) ?? .found(songs?.count ?? 0)
+        guard source != .lrclib else {
+            lyricsResults = songs ?? []
+            return
+        }
         found[source] = songs ?? []
         if touched {
             results += songs ?? []
@@ -108,7 +125,7 @@ extension EnrichModel {
     /// Every source at once (each paced on its own), ranked as they arrive.
     private func search(_ picker: MatchPicker) async {
         await withTaskGroup(of: (OnlineSource, [OnlineSong]?, String?).self) { group in
-            for source in picker.sources {
+            for source in picker.sources + (picker.searchesLyrics ? [.lrclib] : []) {
                 group.addTask { [service, keywords = picker.keywords, storefront = settings.storefront] in
                     // Not `return (source, try await …)`: optimized builds lost `source` across the suspension (it came back
                     // as .netease), so its results went to the wrong source and the others stayed 搜索中.
@@ -141,9 +158,12 @@ extension EnrichModel {
         guard let job = job(picker.row, songID: nil) else { return }
         dequeue(job.fingerprint)
         applying.insert(job.fingerprint)
-        let replace = picker.selection == song.key ? picker.replace : []
-        // Lyrics already loaded for the preview aren't fetched again.
-        let overrides = PickOverrides(fields: replace, lyrics: replace.contains(.lyrics) ? picker.lyrics[song.key].flatMap { $0.isEmpty ? nil : $0 } : nil)
+        let selected = picker.selection == song.key, replace = selected ? picker.replace : []
+        // Lyrics chosen from elsewhere win (the pick's own, for a song without lyrics, just fill the gap); the pick's own,
+        // already loaded for the preview, aren't fetched again.
+        let chosen = selected ? picker.chosenLyrics : nil
+        let lyrics = chosen.flatMap { $0.song.key == song.key && !picker.baseline.hasLyrics ? nil : $0.text }
+        let overrides = PickOverrides(fields: replace, lyrics: lyrics ?? (replace.contains(.lyrics) ? picker.lyrics[song.key].flatMap { $0.isEmpty ? nil : $0 } : nil))
         do { _ = try await service.apply(song, to: job, candidates: picker.results, overrides: overrides) } catch { notice = "补全失败：\(error)" }
         await reloadMatch(job.fingerprint)
         await library.refresh()
