@@ -110,6 +110,8 @@ public final class PlaybackEngine {
     /// placed once the engine has stopped.
     private var anchor: (render: AVAudioFramePosition, player: AVAudioFramePosition, latency: Double)?
     private var outputDevice: AudioDeviceID = 0
+    /// The graph's rate when it doesn't follow the device's (stand-in devices); the output unit converts.
+    private var graphRate: Double?
     private var configurationTask: Task<Void, Never>?
 
     public init(mode: Mode = .device) throws {
@@ -119,8 +121,7 @@ public final class PlaybackEngine {
         [player, channelMixer, gainNode].forEach(engine.attach)
         if case .offline(let rate) = mode {
             isOffline = true
-            try engine.enableManualRenderingMode(.offline, format: AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!,
-                                                 maximumFrameCount: 4096)
+            try engine.enableManualRenderingMode(.offline, format: Self.stereo(rate), maximumFrameCount: 4096)
         } else {
             isOffline = false
             NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main,
@@ -248,6 +249,31 @@ public final class PlaybackEngine {
         lookAhead()
     }
 
+    /// Plays on `device` (nil: stays on the current one) with the graph at `rate` (nil: the device's; offline, the
+    /// rendering rate), carrying on from what was heard. On failure it stays wherever the output unit is, paused.
+    public func setOutput(device: AudioDeviceID?, rate: Double?) throws {
+        generation += 1
+        let point = reachedEnd ? nil : heard(), wasPlaying = isPlaying
+        engine.stop()
+        do {
+            if isOffline {
+                if let rate, rate != engine.manualRenderingFormat.sampleRate {
+                    engine.disableManualRenderingMode()
+                    try engine.enableManualRenderingMode(.offline, format: Self.stereo(rate), maximumFrameCount: 4096)
+                }
+            } else {
+                if let device { try engine.outputNode.withAUAudioUnit { try $0.setDeviceID(device) } }
+                graphRate = rate
+            }
+            try connectOutput()
+        } catch {
+            try? connectOutput()
+            carryOn(from: point, autoplay: false)
+            throw error
+        }
+        carryOn(from: point, autoplay: wasPlaying)
+    }
+
     // MARK: Offline rendering
 
     public func render(frames: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
@@ -263,15 +289,23 @@ public final class PlaybackEngine {
         outputRate = rate > 0 ? rate : 48000
         outputDevice = device
         playerFormat = nil   // the player must follow the new output rate
-        let format = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 2)!
+        let format = Self.stereo(outputRate)
         try engine.connectNode(channelMixer, to: gainNode, format: format)
         try engine.connectNode(gainNode, to: engine.mainMixerNode, format: format)
+        // Explicit, so a new device's rate is converted once, in the output unit.
+        try engine.connectNode(engine.mainMixerNode, to: engine.outputNode, format: format)
+        if metering {
+            gainNode.removeTap(onBus: 0)
+            try? gainNode.installAudioTap(onBus: 0, bufferSize: 2048, format: nil, tapProvider: OutputMeter.tap(meter))
+        }
     }
 
-    /// The output's rate and device as they are now (the device is 0 offline).
+    private static func stereo(_ rate: Double) -> AVAudioFormat { AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)! }
+
+    /// The graph's rate and the output device as they are now (the device is 0 offline).
     private var liveOutput: (rate: Double, device: AudioDeviceID) {
         isOffline ? (engine.manualRenderingFormat.sampleRate, 0)
-            : (engine.outputNode.outputFormat(forBus: 0).sampleRate, engine.outputNode.withAUAudioUnit { $0.deviceID })
+            : (graphRate ?? engine.outputNode.outputFormat(forBus: 0).sampleRate, engine.outputNode.withAUAudioUnit { $0.deviceID })
     }
 
     private func fits(_ file: AVAudioFile) -> Bool {
@@ -418,10 +452,15 @@ public final class PlaybackEngine {
         // Nothing changed for the running graph: leave it (and its gapless player) alone.
         if !deviceGone, engine.isRunning, liveOutput == (outputRate, outputDevice) { return }
         let point = reachedEnd ? nil : heard()
-        guard (try? connectOutput()) != nil, let (segment, time) = point else { return }
+        guard (try? connectOutput()) != nil else { return }
+        carryOn(from: point, autoplay: isPlaying && !deviceGone)
+    }
+
+    private func carryOn(from point: (segment: Segment, time: Double)?, autoplay: Bool) {
+        guard let (segment, time) = point else { return }
         let previous = current?.entryID
         // A failure here is the output's, not the file's: stop rather than skip through the queue.
-        if (try? play(segment.item, at: time, autoplay: isPlaying && !deviceGone)) == nil { isPlaying = false }
+        if (try? play(segment.item, at: time, autoplay: autoplay)) == nil { isPlaying = false }
         if current?.entryID != previous, let current { onEvent?(.advanced(current)) }
         onEvent?(.restarted)
     }

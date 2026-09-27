@@ -256,6 +256,7 @@ enum SongSheet: Identifiable {
     let ui = UIState()
     let library: LibraryModel?
     let player: PlayerModel?
+    let output: OutputModel?
     let loudness: LoudnessModel?
     let enrich: EnrichModel?
     let importer: ImportModel?
@@ -272,6 +273,7 @@ enum SongSheet: Identifiable {
         paths = options.dataDir.map { AppPaths(isolatedRoot: $0) } ?? .standard()
         artwork = ArtworkStore(cache: ArtworkCache(directory: paths.cache.appending(path: "artwork")))
         var library: LibraryModel?, player: PlayerModel?, loudness: LoudnessModel?, enrich: EnrichModel?, client: OnlineClient?
+        var output: OutputModel?
         do {
             let store = try LibraryStore(url: paths.database)
             library = LibraryModel(store: store)
@@ -282,6 +284,9 @@ enum SongSheet: Identifiable {
                 if let library { loudness?.refresh(library.index) }
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
+            // Self-tests never touch the Mac's real devices.
+            let devices: OutputDevices = options.isSelfTest ? FakeOutputDevices() : HALOutputDevices()
+            output = OutputModel(source: devices, player: player!, store: store)
             let fixtures = options.onlineFixturesDir
             client = OnlineClient(configuration: fixtures.map(OnlineFixtures.configuration) ?? .ephemeral)
             enrich = library.map { EnrichModel(store: store, library: $0, client: client!, interval: fixtures == nil ? .milliseconds(600) : .zero) }
@@ -290,6 +295,7 @@ enum SongSheet: Identifiable {
         }
         self.library = library
         self.player = player
+        self.output = output
         self.loudness = loudness
         self.enrich = enrich
         let importer = library.map { ImportModel(library: $0, enrich: enrich, options: options) }

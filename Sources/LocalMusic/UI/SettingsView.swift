@@ -10,7 +10,12 @@ struct SettingsView: View {
             if let library = model.library {
                 TabView(selection: Binding(get: { model.ui.settingsTab }, set: { model.ui.settingsTab = $0 })) {
                     Tab("曲库", systemImage: "music.note.list", value: 0) {
-                        LibrarySettingsView(library: library, loudness: model.loudness)
+                        LibrarySettingsView(library: library)
+                    }
+                    if let output = model.output {
+                        Tab("播放", systemImage: "hifispeaker", value: 3) {
+                            PlaybackSettingsView(output: output, loudness: model.loudness)
+                        }
                     }
                     if let enrich = model.enrich {
                         Tab("在线资料", systemImage: "globe", value: 1) {
@@ -33,7 +38,6 @@ struct SettingsView: View {
 
 private struct LibrarySettingsView: View {
     let library: LibraryModel
-    let loudness: LoudnessModel?
 
     var body: some View {
         Form {
@@ -45,22 +49,6 @@ private struct LibrarySettingsView: View {
                     Spacer()
                     Button("重新扫描") { Task { await library.scan() } }
                         .disabled(library.scanning)
-                }
-            }
-            if let loudness {
-                Section {
-                    NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented)
-                    let progress = loudness.progress
-                    if progress.total > 0 {
-                        LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
-                        if progress.failed > 0 { LabeledContent("无法分析", value: "\(progress.failed) 首") }
-                        if progress.pending > 0 { ProgressView(value: Double(progress.total - progress.pending), total: Double(progress.total)) }
-                    }
-                } header: {
-                    Text("响度均衡")
-                } footer: {
-                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益（只降不升）。")
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -98,6 +86,48 @@ private struct LibrarySettingsView: View {
         }
     }
 }
+
+private struct PlaybackSettingsView: View {
+    let output: OutputModel
+    let loudness: LoudnessModel?
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("输出设备", selection: Binding(get: { output.settings.deviceUID ?? "" }, set: { output.select($0.isEmpty ? nil : $0) })) {
+                    Text("系统默认（\(output.defaultDevice?.name ?? "无")）").tag("")
+                    ForEach(output.devices) { Text("\($0.name) · \($0.transport.title)").tag($0.id) }
+                    if let missing = output.missing, let uid = output.settings.deviceUID { Text("\(missing)（未连接）").tag(uid) }
+                }
+            } header: {
+                Text("输出")
+            } footer: {
+                Text([output.effective.map { "正在使用\($0.name)，\(kHz($0.nominalRate))。" },
+                      "拔掉正在播放的设备时会暂停，不会改从扬声器外放。"].compactMap { $0 }.joined())
+                    .foregroundStyle(.secondary)
+            }
+            if let loudness {
+                Section {
+                    NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented)
+                    let progress = loudness.progress
+                    if progress.total > 0 {
+                        LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
+                        if progress.failed > 0 { LabeledContent("无法分析", value: "\(progress.failed) 首") }
+                        if progress.pending > 0 { ProgressView(value: Double(progress.total - progress.pending), total: Double(progress.total)) }
+                    }
+                } header: {
+                    Text("响度均衡")
+                } footer: {
+                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益（只降不升）。")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+func kHz(_ rate: Double) -> String { String(format: "%g kHz", rate / 1000) }
 
 /// Which sources 信息补全 asks, in which order; the order is also whose value shows when several have one.
 private struct OnlineSourcesSection: View {

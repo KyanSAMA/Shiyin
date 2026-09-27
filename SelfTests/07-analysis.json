@@ -10,7 +10,7 @@
     { "do": "fs", "op": "copy", "from": "@fixtures/extra/新歌.flac", "to": "@out/lib/新歌.flac" },
     { "do": "waitUntil", "path": "library.trackCount", "equals": 12, "timeout": 10 },
     { "do": "waitUntil", "path": "loudness.analyzed", "equals": 12, "timeout": 20 },
-    { "do": "openSettings" },
+    { "do": "openSettings", "tab": 3 },
     { "do": "snapshot", "name": "settings", "window": "settings" },
     { "do": "state", "name": "end" }
   ]

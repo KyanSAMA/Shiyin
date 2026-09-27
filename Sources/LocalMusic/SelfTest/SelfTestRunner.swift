@@ -404,6 +404,25 @@ final class SelfTestRunner {
             try await settle()
         case "play":
             try play(step)
+        case "setOutputDevice":
+            // `uid`, or "default" for the system default.
+            guard let output = model.output else { throw SelfTestFailure(description: "no output") }
+            await output.ready()
+            let uid = try step.required("uid")
+            output.select(uid == "default" ? nil : uid)
+            try await settle()
+        case "fakeOutput":
+            // Plugs, unplugs or makes default a stand-in device (`op`: plug / unplug / setDefault, `uid`).
+            guard let fake = model.output?.source as? FakeOutputDevices else { throw SelfTestFailure(description: "no stand-in devices") }
+            let uid = try step.required("uid")
+            switch try step.required("op") {
+            case "plug": fake.plug(uid)
+            case "unplug": fake.unplug(uid)
+            case "setDefault": fake.setDefault(uid)
+            case let op: throw SelfTestFailure(description: "unknown fakeOutput op \(op)")
+            }
+            await model.output?.settled()
+            try await settle()
         case "simulateDeviceChange":
             try player().engine.simulateConfigurationChange(deviceGone: step["deviceGone"] as? Bool ?? false)
             try await settle()
@@ -898,6 +917,7 @@ final class SelfTestRunner {
             "windows": ["main": main, "mini": miniState(), "scrolls": scrollOffsets()],
             "library": model.library.map(libraryState) ?? NSNull(),
             "player": model.player.map(playerState) ?? NSNull(),
+            "output": model.output.map(outputState) ?? NSNull(),
             "lyrics": model.player.map(lyricsState) ?? NSNull(),
             "loudness": model.loudness.map { ["analyzed": $0.progress.analyzed, "failed": $0.progress.failed, "total": $0.progress.total,
                                                 "pending": $0.progress.pending, "mode": $0.mode.rawValue] as Step } ?? NSNull(),
@@ -947,6 +967,12 @@ final class SelfTestRunner {
                  "failureCount": $0.failures.count, "ms": $0.milliseconds] as Step
             } ?? NSNull(),
         ]
+    }
+
+    private func outputState(_ output: OutputModel) -> Step {
+        ["devices": output.devices.map { ["uid": $0.id, "name": $0.name, "transport": $0.transport.rawValue, "rate": $0.nominalRate] as Step },
+         "selected": output.settings.deviceUID ?? NSNull(), "effective": output.effective?.id ?? NSNull(),
+         "defaultUID": output.defaultUID ?? NSNull(), "missing": output.missing ?? NSNull()]
     }
 
     private func playerState(_ player: PlayerModel) -> Step {

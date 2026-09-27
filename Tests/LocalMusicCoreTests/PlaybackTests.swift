@@ -459,6 +459,18 @@ struct PlaybackEngineTests {
         #expect(rig.ended && rig.events.count == events && !rig.engine.isPlaying)
     }
 
+    @Test func carriesOnAtANewOutputRate() async throws {
+        let rig = try OfflineRig()
+        try rig.engine.play(try rig.item("tone", frames: 0..<144_000) { ToneFile.sine($0) })
+        try await rig.render(seconds: 1)
+        try rig.engine.setOutput(device: nil, rate: 44100)
+        #expect(rig.engine.outputSampleRate == 44100 && abs(rig.engine.position - 1) < 0.01 && rig.engine.isPlaying)
+        rig.meter.reset()
+        try await rig.render(seconds: 0.5)
+        #expect(abs(rig.engine.position - (1 + 0.5 * 48000 / 44100)) < 0.02)   // the rig counts frames at 48 kHz
+        #expect(rig.meter.reading.rmsDbfs > -12)
+    }
+
     @Test func pausesAndResumesInPlace() async throws {
         let rig = try OfflineRig()
         let tone = try rig.item("tone", frames: 0..<96000) { ToneFile.sine($0) }

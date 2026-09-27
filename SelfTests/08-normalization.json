@@ -80,7 +80,7 @@
     { "do": "assert", "path": "measure.gapless.longestGapMs", "lt": 1 },
     { "do": "assert", "path": "measure.gapless.maxStep", "lt": 0.02 },
     { "do": "snapshot", "name": "player-bar" },
-    { "do": "openSettings" },
+    { "do": "openSettings", "tab": 3 },
     { "do": "snapshot", "name": "settings", "window": "settings" },
     { "do": "state", "name": "end" }
   ]

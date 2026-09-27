@@ -308,6 +308,13 @@ func siren(_ arguments: [String]) async throws {
 }
 
 switch arguments.first {
+case "devices":
+    // Read-only: the output devices, their rates and the default.
+    let devices = HALOutputDevices()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    print(String(decoding: try encoder.encode(devices.devices), as: UTF8.self))
+    print("default: \(devices.defaultUID ?? "none")")
 case "siren" where arguments.count > 1:
     try await siren(Array(arguments.dropFirst()))
 case "tags" where arguments.count > 1:
@@ -329,6 +336,6 @@ case "write-tags" where arguments.count > 1:
 case "restore-tags" where arguments.count == 4 && arguments[2] == "--backup":
     try await restoreTags(arguments[1], backup: arguments[3])
 default:
-    FileHandle.standardError.write(Data("usage: lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file> | lmtool write-tags <file> --backup <json> [--set k=v]... [--cover img] [--lyrics file] | lmtool restore-tags <file> --backup <json> | lmtool ncm <file.ncm> [--out <dir>] [--fill] | lmtool siren albums | album <cid> | get <cid> <dir>\n".utf8))
+    FileHandle.standardError.write(Data("usage: lmtool devices | lmtool tags [--stats] [--sha] <paths>... | lmtool lrc <file> | lmtool scan <db> [<root>...] | lmtool decode-check <paths>... | lmtool loudness [--album] <paths>... | lmtool online search|lyric <source> <keywords> | song <id> | match <file> | lmtool write-tags <file> --backup <json> [--set k=v]... [--cover img] [--lyrics file] | lmtool restore-tags <file> --backup <json> | lmtool ncm <file.ncm> [--out <dir>] [--fill] | lmtool siren albums | album <cid> | get <cid> <dir>\n".utf8))
     exit(64)
 }

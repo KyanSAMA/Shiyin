@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 import Observation
 import LocalMusicCore
@@ -153,6 +154,12 @@ import LocalMusicCore
             if item.entryID == playing, !modeChanged, loudness?.isMeasured(item.trackID) == false { return item.gainDb }
             return gainDb(for: item.trackID)
         }
+    }
+
+    /// Moves playback to another output, carrying on from what was heard; false if it failed (paused where it was).
+    func setOutput(device: AudioDeviceID?, rate: Double?) -> Bool {
+        perform { try engine.setOutput(device: device, rate: rate) }
+        return lastError == nil
     }
 
     func setVolume(_ value: Float) {
