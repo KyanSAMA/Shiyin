@@ -1,0 +1,15 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "relaunch": "hw-output-quit.json",
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "setOutputDevice", "uid": "BuiltInHeadphoneOutputDevice" },
+    { "do": "setFollowRate", "value": true },
+    { "do": "play", "title": "ID3v2.4 测试" },
+    { "do": "waitSwitch" },
+    { "do": "assert", "path": "output.effectiveRate", "equals": 44100 },
+    { "do": "abort" }
+  ]
+}

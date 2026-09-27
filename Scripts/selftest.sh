@@ -1,7 +1,8 @@
 #!/bin/bash
 # Run one self-test script against a fresh debug bundle.
 # Usage: Scripts/selftest.sh SelfTests/01-shell.json   (SKIP_BUNDLE=1 to reuse build/LocalMusic.app; ONLINE_LIVE=1 to
-# reach the real online sources instead of the recordings in SelfTests/online)
+# reach the real online sources instead of the recordings in SelfTests/online; REAL_OUTPUT=1 lets a manual hardware check
+# drive the Mac's real output devices)
 # Exit: 0 pass, 1 assertion/script failure, 2 timeout or crash.
 set -uo pipefail
 SCRIPT=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
@@ -21,7 +22,7 @@ run() {
     build/LocalMusic.app/Contents/MacOS/LocalMusic \
     --selftest "$1" --out "$2" --data-dir "$OUT/data" --fixtures .build/fixtures \
     $([ "${ONLINE_LIVE:-0}" = 1 ] || echo --online-fixtures SelfTests/online) \
-    -ApplePersistenceIgnoreState YES > "$2/app.log" 2>&1
+    -ApplePersistenceIgnoreState YES $([ "${REAL_OUTPUT:-0}" = 1 ] && echo --real-output) > "$2/app.log" 2>&1
   local code=$?
   [ $code -gt 2 ] && code=2
   [ -f "$2/report.json" ] || code=2

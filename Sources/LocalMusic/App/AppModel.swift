@@ -11,6 +11,8 @@ struct LaunchOptions {
     let fixturesDir: URL?
     /// Recorded online responses instead of the network (self-tests).
     let onlineFixturesDir: URL?
+    /// A manual hardware check: the self-test drives the Mac's real output devices (their rate and volume).
+    let realOutput: Bool
 
     static let current = LaunchOptions(arguments: CommandLine.arguments)
 
@@ -24,6 +26,7 @@ struct LaunchOptions {
         dataDir = url(after: "--data-dir")
         fixturesDir = url(after: "--fixtures")
         onlineFixturesDir = url(after: "--online-fixtures")
+        realOutput = arguments.contains("--real-output")
     }
 
     var isSelfTest: Bool { selfTestScript != nil }
@@ -286,8 +289,8 @@ enum SongSheet: Identifiable {
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
             // Self-tests never touch the Mac's real devices.
-            HALOutputDevices.writesAllowed = !options.isSelfTest
-            let devices: OutputDevices = options.isSelfTest
+            HALOutputDevices.writesAllowed = !options.isSelfTest || options.realOutput
+            let devices: OutputDevices = options.isSelfTest && !options.realOutput
                 ? FakeOutputDevices(state: paths.data.appending(path: "fake-output.json")) : HALOutputDevices()
             output = OutputModel(source: devices, player: player!, store: store)
             let fixtures = options.onlineFixturesDir

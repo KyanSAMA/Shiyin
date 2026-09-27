@@ -997,6 +997,7 @@ final class SelfTestRunner {
     private func outputState(_ output: OutputModel) -> Step {
         ["devices": output.devices.map { ["uid": $0.id, "name": $0.name, "transport": $0.transport.rawValue, "rate": $0.nominalRate] as Step },
          "selected": output.settings.deviceUID ?? NSNull(), "effective": output.effective?.id ?? NSNull(),
+         "effectiveRate": output.effective?.nominalRate ?? NSNull(),
          "defaultUID": output.defaultUID ?? NSNull(), "missing": output.missing ?? NSNull(),
          "passthrough": output.settings.passthrough, "deviceVolume": output.effective?.volume ?? NSNull(),
          "signalPath": output.signalPath.map { ["untouched": $0.untouched, "resampled": $0.resampled, "lines": $0.lines] as Step } ?? NSNull(),

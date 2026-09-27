@@ -110,7 +110,7 @@ import Dispatch
     /// A visible device with output streams.
     private static func info(_ id: AudioDeviceID) -> OutputDeviceInfo? {
         guard !array(id, kAudioDevicePropertyStreams, scope: kAudioObjectPropertyScopeOutput, of: AudioStreamID.self).isEmpty,
-              array(id, kAudioDevicePropertyIsHidden, of: UInt32.self).first != 1,
+              array(id, kAudioDevicePropertyIsHidden, of: UInt32.self).first != 1, !isPrivateAggregate(id),
               let uid = string(id, kAudioDevicePropertyDeviceUID) else { return nil }
         let ranges = array(id, kAudioDevicePropertyAvailableNominalSampleRates, of: AudioValueRange.self)
         let rates = standardRates.filter { rate in ranges.contains { $0.mMinimum <= rate && rate <= $0.mMaximum } }
@@ -118,6 +118,17 @@ import Dispatch
                                 transport: OutputTransport(array(id, kAudioDevicePropertyTransportType, of: UInt32.self).first ?? 0),
                                 rates: rates, nominalRate: array(id, kAudioDevicePropertyNominalSampleRate, of: Float64.self).first ?? 0,
                                 volume: volume(id))
+    }
+
+    /// An aggregate an app made for itself (the system's default-device one, say), not a device to pick.
+    private static func isPrivateAggregate(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioAggregateDevicePropertyComposition, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFDictionary>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFDictionary>?>.size)
+        guard AudioObjectHasProperty(id, &address), AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr,
+              let composition = value?.takeRetainedValue() as? [String: Any] else { return false }
+        return (composition[kAudioAggregateDeviceIsPrivateKey] as? NSNumber)?.boolValue == true
     }
 
     private static let standardRates: [Double] = [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000]
