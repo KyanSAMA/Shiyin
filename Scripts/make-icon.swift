@@ -1,6 +1,15 @@
 // Renders the app icon (run by bundle.sh): swift Scripts/make-icon.swift <out.icns>
 import AppKit
 
+func color(_ hex: UInt32) -> NSColor {
+    NSColor(srgbRed: CGFloat(hex >> 16 & 0xff) / 255, green: CGFloat(hex >> 8 & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+}
+
+func circle(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ hex: UInt32) {
+    color(hex).setFill()
+    NSBezierPath(ovalIn: NSRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)).fill()
+}
+
 func render(_ pixels: Int) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4,
                                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -20,13 +29,33 @@ func render(_ pixels: Int) -> Data {
     NSColor.black.setFill()
     shape.fill()
     NSGraphicsContext.restoreGraphicsState()
-    NSGradient(colors: [NSColor(srgbRed: 0.98, green: 0.45, blue: 0.36, alpha: 1), NSColor(srgbRed: 0.55, green: 0.22, blue: 0.78, alpha: 1),
-                        NSColor(srgbRed: 0.16, green: 0.14, blue: 0.45, alpha: 1)])!.draw(in: shape, angle: -65)
-    let config = NSImage.SymbolConfiguration(pointSize: 470, weight: .semibold).applying(.init(paletteColors: [.white]))
-    if let note = NSImage(systemSymbolName: "music.note", accessibilityDescription: nil)?.withSymbolConfiguration(config) {
-        let size = note.size
-        note.draw(in: NSRect(x: 512 - size.width / 2 - 10, y: 512 - size.height / 2, width: size.width, height: size.height))
+    // A record half out of its sleeve, on a cream ground.
+    NSGraphicsContext.saveGraphicsState()
+    shape.addClip()
+    color(0xF5EFE6).setFill()
+    shape.fill()
+    circle(640, 512, 250, 0x16161A)
+    NSColor(white: 1, alpha: 0.1).setStroke()
+    for r in stride(from: 232.0, to: 105, by: -18.75) {
+        let groove = NSBezierPath(ovalIn: NSRect(x: 640 - r, y: 512 - r, width: 2 * r, height: 2 * r))
+        groove.lineWidth = 3
+        groove.stroke()
     }
+    circle(640, 512, 85, 0xFFC53D)
+    circle(640, 512, 11, 0x16161A)
+    NSGraphicsContext.saveGraphicsState()
+    let sleeve = NSShadow()
+    sleeve.shadowColor = .black.withAlphaComponent(0.18)
+    sleeve.shadowOffset = NSSize(width: 10, height: 0)
+    sleeve.shadowBlurRadius = 24
+    sleeve.set()
+    color(0xF0563A).setFill()
+    NSBezierPath(roundedRect: NSRect(x: 170, y: 272, width: 480, height: 480), xRadius: 32, yRadius: 32).fill()
+    NSGraphicsContext.restoreGraphicsState()
+    circle(410, 512, 30, 0xF5EFE6)
+    NSColor(white: 1, alpha: 0.22).setFill()
+    NSBezierPath(roundedRect: NSRect(x: 205, y: 310, width: 120, height: 24), xRadius: 12, yRadius: 12).fill()
+    NSGraphicsContext.restoreGraphicsState()
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
 }
