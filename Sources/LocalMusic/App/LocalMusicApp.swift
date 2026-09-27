@@ -6,7 +6,7 @@ struct LocalMusicApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        Window("本地音乐", id: "main") {
+        Window("拾音", id: "main") {
             RootView()
                 .environment(AppModel.shared)
         }

@@ -24,8 +24,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>io.github.kyansama.localmusic</string>
   <key>CFBundleExecutable</key><string>LocalMusic</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleName</key><string>本地音乐</string>
-  <key>CFBundleDisplayName</key><string>本地音乐</string>
+  <key>CFBundleName</key><string>拾音</string>
+  <key>CFBundleDisplayName</key><string>拾音</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.$(git rev-list --count HEAD)</string>
   <key>CFBundleVersion</key><string>$(git rev-list --count HEAD)</string>

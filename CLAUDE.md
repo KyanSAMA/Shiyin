@@ -1,10 +1,10 @@
-# LocalMusic
+# 拾音
 
-macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步计划与进度见 `实施计划.md`。
+拾音（Shiyin）：macOS 27 本地音乐播放器，功能说明见 `README.md`。可执行文件、数据目录（`~/Library/Application Support/LocalMusic`）和 bundle id 沿用 LocalMusic，改名只改显示名，免得丢掉用户数据。
 
 ## 命令
 - 构建 / 测试：`swift build`、`swift test`
-- 打包：`Scripts/bundle.sh [debug|release]` → `build/LocalMusic.app`（ad-hoc 签名；图标由 `Scripts/make-icon.swift` 生成到 `.build/AppIcon.icns`；日常使用打 release，debug 版响度分析慢约 10 倍）
+- 打包：`Scripts/bundle.sh [debug|release]` → `build/LocalMusic.app`（ad-hoc 签名；图标由 `Scripts/make-icon.swift` 生成到 `.build/AppIcon.icns`；日常使用打 release，debug 版响度分析慢约 10 倍）；发布：`Scripts/make-dmg.sh` → `build/Shiyin-<版本>.dmg`（release 包改名为「拾音.app」加「应用程序」链接），上传到 GitHub Release
 - 自测：`Scripts/selftest.sh SelfTests/NN-*.json` → `.build/selftest/<name>/`（PNG、`*.state.json`、`report.json`、`app.log`）；退出码 0 通过 / 1 失败 / 2 超时或崩溃
 - 全部自测：`Scripts/run-all-selftests.sh`（结束时用 `find -newer` 证明 `~/Music` 未被写入）；夹具由 `Scripts/make-fixtures.sh` 生成到 `.build/fixtures`（改动时递增 VERSION）
 - 无障碍操作：`swift Scripts/ax-press.swift <文本>`（或先 `swiftc -O` 编译），对运行中 App 里标题/描述/值等于该文本的元素做 AX 选中行 / 按下
@@ -17,7 +17,7 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - 曲库默认只读：只有 `TagWriter` 在用户明确「写入文件 / 恢复原标签」时改文件（`TagRegion.commit` 是唯一改动曲库文件的代码）：只改标签区，同目录隐藏临时文件（`.<名>.localmusic-tmp-<随机>.<扩展名>`，长度不变时 clone，变长时只复制权限 / ACL / 扩展属性，修改时间取新的）+ `rename` 原子替换，替换前校验音频字节 SHA-256、指纹、读回的值、`AVAudioFile` 能打开，并确认原文件没被改过；扫描、补全等其他代码路径不得写入曲库目录；导入（`Importer`）只在导入目录里新建文件（同目录隐藏暂存 `.localmusic-import-<随机>` → `TagWriter` 写标签校验 → `renamex_np(RENAME_EXCL)`），永不覆盖，原文件只在用户勾选时移到废纸篓（自测为 `@out/Trash`）；自测只写自测目录（数据目录的上一级）里的副本，lmtool 只写 `~/Music` 以外的副本；原标签区备份在数据目录 `TagBackups/<id>.bin`（`tag_backup` 表，每个文件只留第一次写入前的，写入中为 pending，启动时收尾），写入后已进文件的手动修改移出手动层、恢复时放回；写入后按新的大小 / 修改时间更新响度记录，免得重新分析
 - `URL` 会缓存 `resourceValues`：判断文件是否变过（大小 / 修改时间）前先 `removeAllCachedResourceValues()`，否则读到的是旧值
 - 设置存 SQLite `setting` 表，不用 UserDefaults
-- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并（封面 / 歌词同样手动优先：`TrackRow.userCover`、`lyrics(for:)`）；「选择匹配」写各来源层（只补空缺；勾选「替换」的项写手动层），「编辑信息」写手动层；各来源接口的注意事项见 `需求与技术路线.md` 4.2
+- 补全 / 手动编辑存 `enrichment` 表，按音频内容指纹（`AudioFingerprint`：FLAC 用 STREAMINFO MD5，其他格式用音频数据区开头的哈希）关联，不按路径或曲目 id；每个在线来源（`OnlineSource`：网易云 / QQ 音乐 / iTunes / LRCLIB）各存一层；显示值 = 手动编辑 > 文件标签 > 各在线来源（按设置 `onlineSources` 的顺序）> 本地推断，在 `LibraryStore.rows()` 里合并（封面 / 歌词同样手动优先：`TrackRow.userCover`、`lyrics(for:)`）；「选择匹配」写各来源层（只补空缺；勾选「替换」的项写手动层），「编辑信息」写手动层；各来源接口的注意事项见下文「在线接口」
 - 数据库迁移只追加，不修改已提交的迁移
 - 交给 AVFAudio / MediaPlayer / FSEvents 的回调闭包在 `LocalMusicCore` 的非隔离代码或 `nonisolated static` 工厂里构造，只捕获 Sendable 值，再 `Task { @MainActor in … }` 切回
 - App 目标默认 MainActor 隔离；纯逻辑放 `LocalMusicCore` 以便单测
@@ -30,6 +30,15 @@ macOS 27 本地音乐播放器。需求见 `需求与技术路线.md`，分步�
 - SwiftUI 列表性能（`SelfTests/13-real-perf.json` 实测）：内容整体换掉的 `Table` / `List`（换排序、搜索、筛选、艺人↔作曲）用 `.id` 重建而不是 diff（diff 会逐行动画并重新量行高，排序 1.4 s）；隐藏的 inspector 仍保留内容，队列视图只在显示时构建（否则开播 322 首时排版全部队列行，~600 ms）；工具栏项放在不随导航推入 / 弹出变化的层级（每次增删工具栏项 ~100 ms）；SwiftUI `Table` 每个可见单元格一个托管视图、逐个量行高，新建一张就要 130–230 ms，所以歌曲表 / 专辑曲目表是 AppKit `NSTableView`（`SongsTableView`，固定行高、单元格复用、换数据只 `reloadData`）
 - Swift 6.4 release 优化的已知坑：`return (x, try await f())` 这类元组 / 实参里夹着 `await`，前面已取好的值跨挂起点会丢（实测 TaskGroup 子任务返回的枚举变成第一个 case）；先 `let y = try await f()` 再组合。自测默认跑 debug 包抓不到，涉及并发的改动要用 release 包再跑（`Scripts/bundle.sh release && SKIP_BUNDLE=1 Scripts/selftest.sh …`）
 - `Commands` 菜单只在打开时重读模型状态，且禁用的菜单项仍会吞掉自己的快捷键：带快捷键的菜单项不按动态状态禁用，由动作本身判断
+
+## 在线接口
+非官方接口带浏览器 UA 和 Referer，随时可能变动。
+- 网易云：搜索 `/api/cloudsearch/pc?s=&type=1`（常缺发行时间）；详情 `/api/song/detail/?ids=[id]`（`no` 曲序、`disc`、`album.picUrl` / `publishTime` 取年份）；歌词 `/api/song/lyric?id=&lv=1&tv=-1`（`lrc` 含署名行、`tlyric` 翻译；纯音乐 `pureMusic` 且原文为空）
+- QQ 音乐：`u.y.qq.com/cgi-bin/musicu.fcg?data={json}`（`music.search.SearchCgiService` / `DoSearchForQQMusicDesktop`）；歌词 `c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=&format=json&nobase64=1`（第一行时间行是「标题 - 艺人」，纯音乐是一行提示）；封面 `y.gtimg.cn/music/photo_new/T002R{150,800,1200}x…M000{专辑 mid}.jpg`
+- iTunes：`itunes.apple.com/search?entity=song&country=&lang=en_us`；日区用繁体 / 日文写法，多艺人写成「A, B & C」，专辑带「 - Single」，发行时间是当地午夜的 UTC 时刻
+- LRCLIB：`lrclib.net/api/search?q=`，结果自带歌词，纯音乐 `instrumental: true`；只补歌词、最后查，且要别的来源先认出这首歌
+- 匹配：有 163 key 按 id 精确匹配；否则按设置顺序搜索，标题一致、时长 ±2 s、且艺人或专辑（不能就是歌名）一致才算高置信，都不确定时候选进待确认
+- 塞壬唱片（`monster-siren.hypergryph.com`）：`/api/albums`、`/api/songs`、`/api/album/{cid}/detail`（曲目顺序）、`/api/song/{cid}`（`sourceUrl` 多为 WAV、带签名会过期，下载前现取；`lyricUrl` 大多为空，LRC 行间有空行）；专辑名可能带前导空格
 
 ## 自测
 - 启动参数：`--selftest <script> --out <dir> --data-dir <dir> [--fixtures <dir>] [--online-fixtures <dir>]`（`selftest.sh` 默认传 `SelfTests/online` 录制应答，`ONLINE_LIVE=1` 才连真实的在线来源）；数据目录隔离，不碰真实 Application Support；自测模式下曲库不自动启动
