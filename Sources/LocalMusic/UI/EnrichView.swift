@@ -11,8 +11,10 @@ struct EnrichView: View {
     var body: some View {
         @Bindable var ui = model.ui
         let backedUp = model.library?.backedUp ?? []
-        let rows = ui.narrowed(index.songs, in: index).filter { ui.enrichFilter.includes($0, enrich.match($0), backedUp: backedUp) }
-        let counts = EnrichFilter.counts(index.songs, enrich.match, backedUp: backedUp)
+        // The search and filter narrow the counts and 全部补全 too, as they do the list.
+        let narrowed = ui.narrowed(index.songs, in: index)
+        let rows = narrowed.filter { ui.enrichFilter.includes($0, enrich.match($0), backedUp: backedUp) }
+        let counts = EnrichFilter.counts(narrowed, enrich.match, backedUp: backedUp)
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
@@ -25,7 +27,7 @@ struct EnrichView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 16)
-                    actions(rows: rows)
+                    actions(rows: rows, narrowed: narrowed)
                 }
                 HStack {
                     filters(EnrichFilter.enrichment, counts: counts)
@@ -91,7 +93,7 @@ struct EnrichView: View {
         Task { await model.chooseMatch(row) }
     }
 
-    @ViewBuilder private func actions(rows: [TrackRow]) -> some View {
+    @ViewBuilder private func actions(rows: [TrackRow], narrowed: [TrackRow]) -> some View {
         if let progress = enrich.progress {
             HStack(spacing: 10) {
                 ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1))).frame(width: 140)
@@ -115,7 +117,7 @@ struct EnrichView: View {
                     model.ui.enrichSelection = []
                 }
                     .disabled(selected.isEmpty)
-                Button("全部补全") { Task { await enrich.enrichAll(index.songs) } }
+                Button("全部补全") { Task { await enrich.enrichAll(narrowed) } }
                     .buttonStyle(.borderedProminent)
             }
         }

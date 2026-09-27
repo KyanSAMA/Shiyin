@@ -50,6 +50,19 @@
       "equals": 1
     },
     {
+      "do": "search",
+      "value": "春日影"
+    },
+    {
+      "do": "assert",
+      "path": "enrich.counts.unwritten",
+      "equals": 0
+    },
+    {
+      "do": "search",
+      "value": ""
+    },
+    {
       "do": "wait",
       "seconds": 0.5
     },

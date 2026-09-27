@@ -135,6 +135,23 @@
       "equals": 0
     },
     {
+      "do": "sidebar",
+      "value": "songs"
+    },
+    {
+      "do": "sidebar",
+      "value": "netease"
+    },
+    {
+      "do": "wait",
+      "seconds": 0.3
+    },
+    {
+      "do": "assert",
+      "path": "import.processed",
+      "equals": {}
+    },
+    {
       "do": "assert",
       "path": "import.trashed",
       "equals": [

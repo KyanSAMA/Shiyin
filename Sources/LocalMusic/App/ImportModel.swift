@@ -27,7 +27,7 @@ enum ImportState: Equatable {
     case failed(String)
 }
 
-/// One migration's outcome, for 本次已处理.
+/// One migration's outcome, for 本次已处理 (until the page is left).
 struct ImportRecord: Identifiable {
     let id = UUID()
     let source: ImportSource
@@ -88,8 +88,10 @@ struct ImportRecord: Identifiable {
     /// The queue run to its end (self-tests).
     func finish() async { await run?.value }
 
-    /// The page opened: list the folder and keep watching it.
+    /// The page opened: list the folder and keep watching it. 本次已处理 starts afresh unless a migration is under way
+    /// (the trashed originals are gone from the folder).
     func activate() {
+        if !running { processed.removeAll() }
         guard !active else { return }
         active = true
         Task {

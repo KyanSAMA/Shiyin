@@ -358,7 +358,7 @@ final class SelfTestRunner {
             // `titles`, else everything still missing something (全部补全); waits for the queue.
             guard let enrich = model.enrich else { throw SelfTestFailure(description: "no enrichment") }
             let index = try library().index
-            if step["titles"] != nil { enrich.enrich(try trackIDs(step).compactMap { index.tracks[$0] }) } else { await enrich.enrichAll(index.songs) }
+            if step["titles"] != nil { enrich.enrich(try trackIDs(step).compactMap { index.tracks[$0] }) } else { await enrich.enrichAll(model.ui.narrowed(index.songs, in: index)) }
             await enrich.finish()
             try await settle()
         case "rejectMatch":
@@ -614,7 +614,8 @@ final class SelfTestRunner {
     private func enrichState(_ enrich: EnrichModel) -> Step {
         let songs = model.library?.index.songs ?? []
         func titles(_ status: MatchStatus) -> [String] { songs.filter { enrich.match($0)?.status == status }.map(\.title).sorted() }
-        let counts = EnrichFilter.counts(songs, enrich.match, backedUp: model.library?.backedUp ?? [])
+        // As the page shows them: narrowed by the search and filter.
+        let counts = model.library.map { EnrichFilter.counts(model.ui.narrowed(songs, in: $0.index), enrich.match, backedUp: $0.backedUp) } ?? [:]
         return ["running": enrich.progress != nil, "notice": enrich.notice ?? NSNull(),
                 "counts": Dictionary(uniqueKeysWithValues: EnrichFilter.allCases.map { ($0.rawValue, counts[$0] ?? 0) }),
                 "auto": titles(.auto), "confirmed": titles(.confirmed), "pending": titles(.pending), "none": titles(.none), "rejected": titles(.rejected),
