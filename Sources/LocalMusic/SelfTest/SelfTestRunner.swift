@@ -404,6 +404,9 @@ final class SelfTestRunner {
             try await settle()
         case "play":
             try play(step)
+        case "simulateDeviceChange":
+            try player().engine.simulateConfigurationChange(deviceGone: step["deviceGone"] as? Bool ?? false)
+            try await settle()
         case "togglePlayPause":
             try player().togglePlayPause()
         case "pause":

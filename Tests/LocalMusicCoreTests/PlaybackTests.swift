@@ -391,6 +391,74 @@ struct PlaybackEngineTests {
         #expect(abs(loudness - -12.74) < 0.05, "\(loudness)")
     }
 
+    /// Samples after the restart, where the ramp's value encodes the position it came from.
+    private func resumedSamples(_ rig: OfflineRig, after count: Int) -> [Float] { rig.captured[count...].filter { $0 != 0 } }
+
+    @Test func restartsWhereTheRenderGotToNotAtTheLastTick() async throws {
+        let rig = try OfflineRig()
+        let frames = 240_000
+        try rig.engine.play(try rig.item("ramp", frames: 0..<frames) { Float($0) / Float(frames) })
+        try await rig.render(seconds: 1)
+        try await rig.render(seconds: 0.2, tick: false)
+        let last = try #require(rig.captured.last), count = rig.captured.count
+        rig.engine.simulateConfigurationChange()
+        rig.engine.simulateConfigurationChange()   // a second notification doesn't move it again
+        try await rig.render(seconds: 0.3)
+        let first = try #require(resumedSamples(rig, after: count).first)
+        #expect(abs(Double(first - last) * Double(frames)) < 2, "\(Double(first) * Double(frames) / 48000)")
+        #expect(rig.engine.isPlaying && rig.events.filter { if case .restarted = $0 { true } else { false } }.count == 2)
+    }
+
+    @Test func restartsInTheNextTrackWhenTheJoinWasHeard() async throws {
+        let rig = try OfflineRig()
+        let first = try rig.item("a", frames: 0..<48000) { Float($0) / 96000 }
+        let second = try rig.item("b", frames: 0..<48000) { 0.5 + Float($0) / 96000 }
+        rig.upcoming = [second]
+        try rig.engine.play(first)
+        try await rig.render(seconds: 0.8)
+        try await rig.render(seconds: 0.4, tick: false)   // across the join, unnoticed
+        let count = rig.captured.count
+        rig.engine.simulateConfigurationChange()
+        try await rig.render(seconds: 0.3)
+        let resumed = resumedSamples(rig, after: count)
+        #expect(rig.engine.current == second && rig.advanced == 1)
+        #expect(resumed.allSatisfy { $0 >= 0.5 })   // nothing of the first track again
+        #expect(abs(Double(try #require(resumed.first)) - 0.6) < 1e-3)
+    }
+
+    @Test func staysPausedAcrossARestart() async throws {
+        let rig = try OfflineRig()
+        let frames = 240_000
+        try rig.engine.play(try rig.item("ramp", frames: 0..<frames) { Float($0) / Float(frames) })
+        try await rig.render(seconds: 0.5)
+        rig.engine.pause()
+        let paused = rig.engine.position
+        rig.engine.simulateConfigurationChange()
+        #expect(!rig.engine.isPlaying && rig.engine.position == paused)
+        let count = rig.captured.count
+        try rig.engine.resume()
+        try await rig.render(seconds: 0.2)
+        let first = try #require(resumedSamples(rig, after: count).first)
+        #expect(abs(Double(first) * Double(frames) / 48000 - paused) < 0.002)
+    }
+
+    @Test func pausesWhenTheDeviceIsGone() async throws {
+        let rig = try OfflineRig()
+        try rig.engine.play(try rig.item("tone", frames: 0..<96000) { ToneFile.sine($0) })
+        try await rig.render(seconds: 0.5)
+        rig.engine.simulateConfigurationChange(deviceGone: true)
+        #expect(!rig.engine.isPlaying && !rig.ended && abs(rig.engine.position - 0.5) < 0.01)
+    }
+
+    @Test func ignoresARestartAfterTheEnd() async throws {
+        let rig = try OfflineRig()
+        try rig.engine.play(try rig.item("tone", frames: 0..<12000) { ToneFile.sine($0) })
+        try await rig.render(seconds: 0.5)
+        let events = rig.events.count
+        rig.engine.simulateConfigurationChange()
+        #expect(rig.ended && rig.events.count == events && !rig.engine.isPlaying)
+    }
+
     @Test func pausesAndResumesInPlace() async throws {
         let rig = try OfflineRig()
         let tone = try rig.item("tone", frames: 0..<96000) { ToneFile.sine($0) }

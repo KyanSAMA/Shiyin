@@ -53,13 +53,16 @@ final class GainUnit: AUAudioUnit {
 
     /// Drops an armed switch: `db` from now on, or `next` if the render has already crossed the switch.
     func disarm(_ db: Float, next: Float?, snap: Bool) {
-        let rendered = Float64(renderer.renderedUntil.load(ordering: .relaxed))
+        let rendered = Float64(renderedUntil)
         renderer.requested.withLock { plan in
             plan.gain = Self.linear(next.map { rendered > plan.switchAt ? $0 : db } ?? db)
             plan.switchAt = .infinity
             if snap { plan.snaps += 1 }
         }
     }
+
+    /// Render sample time just past the last rendered frame.
+    var renderedUntil: AVAudioFramePosition { renderer.renderedUntil.load(ordering: .relaxed) }
 
     private static func linear(_ db: Float) -> Float { pow(10, db / 20) }
 

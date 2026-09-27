@@ -290,7 +290,7 @@ import LocalMusicCore
         switch event {
         case .advanced(let item):
             queue.select(item.entryID)
-        case .ended:
+        case .ended, .restarted:
             break
         case .failed(let item, let message):
             lastError = message

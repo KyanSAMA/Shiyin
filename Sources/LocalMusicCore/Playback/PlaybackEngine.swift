@@ -42,6 +42,8 @@ public final class PlaybackEngine {
         case advanced(PlaybackItem)
         case ended
         case failed(PlaybackItem, String)
+        /// Restarted after the output changed (another device, sample rate); the position jumped to what was heard.
+        case restarted
     }
 
     public private(set) var current: PlaybackItem?
@@ -104,6 +106,11 @@ public final class PlaybackEngine {
     private var handoff: PlaybackItem?
     /// Everything queued has played; resuming restarts the current item.
     private var reachedEnd = false
+    /// Render and player sample times at the last tick, and the output latency then: what has been heard can still be
+    /// placed once the engine has stopped.
+    private var anchor: (render: AVAudioFramePosition, player: AVAudioFramePosition, latency: Double)?
+    private var outputDevice: AudioDeviceID = 0
+    private var configurationTask: Task<Void, Never>?
 
     public init(mode: Mode = .device) throws {
         GainUnit.registered
@@ -143,6 +150,7 @@ public final class PlaybackEngine {
             try engine.connectNode(player, to: channelMixer, format: format)
             playerFormat = format
         }
+        anchor = nil
         let segment = schedule(item, file, from: time, playerStart: 0)
         enter(segment, snap: true)
         position = Double(segment.startFrame) / segment.rate
@@ -152,12 +160,14 @@ public final class PlaybackEngine {
     public func resume() throws {
         guard let current else { return }
         if reachedEnd { return try play(current) }
+        anchor = nil
         if !engine.isRunning { try engine.start() }
         try player.playAudio()
         isPlaying = true
     }
 
     public func pause() {
+        tick()   // the position as heard, where a restart while paused picks up
         guard isPlaying else { return }
         player.pause()
         if !isOffline { engine.pause() }   // release the audio hardware while paused
@@ -218,7 +228,9 @@ public final class PlaybackEngine {
         if let renderTime = player.lastRenderTime, renderTime.isSampleTimeValid,
            let playerTime = player.playerTime(forNodeTime: renderTime) {
             let rendered = Double(playerTime.sampleTime) / playerTime.sampleRate
-            let now = rendered - (isOffline ? 0 : engine.outputNode.presentationLatency)
+            let latency = isOffline ? 0 : engine.outputNode.presentationLatency
+            if isPlaying { anchor = (renderTime.sampleTime, playerTime.sampleTime, latency) }
+            let now = rendered - latency
             let segment = segments.last { $0.playerStart <= now } ?? segments[0]
             let switched = segment.id != currentSegment
             if switched {
@@ -247,12 +259,19 @@ public final class PlaybackEngine {
     // MARK: Internals
 
     private func connectOutput() throws {
-        let rate = isOffline ? engine.manualRenderingFormat.sampleRate : engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let (rate, device) = liveOutput
         outputRate = rate > 0 ? rate : 48000
+        outputDevice = device
         playerFormat = nil   // the player must follow the new output rate
         let format = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 2)!
         try engine.connectNode(channelMixer, to: gainNode, format: format)
         try engine.connectNode(gainNode, to: engine.mainMixerNode, format: format)
+    }
+
+    /// The output's rate and device as they are now (the device is 0 offline).
+    private var liveOutput: (rate: Double, device: AudioDeviceID) {
+        isOffline ? (engine.manualRenderingFormat.sampleRate, 0)
+            : (engine.outputNode.outputFormat(forBus: 0).sampleRate, engine.outputNode.withAUAudioUnit { $0.deviceID })
     }
 
     private func fits(_ file: AVAudioFile) -> Bool {
@@ -369,9 +388,49 @@ public final class PlaybackEngine {
         }
     }
 
+    /// The segment and time in its file last heard: what the gain unit rendered, placed on the player timeline through
+    /// the last tick's anchor, less what the output hadn't played yet. Without an anchor (paused, just started), the
+    /// ticked position.
+    private func heard() -> (segment: Segment, time: Double)? {
+        guard let first = segments.first(where: { $0.id == currentSegment }) else { return nil }
+        guard isPlaying, let anchor else { return (first, position) }
+        let now = Double(anchor.player + gain.renderedUntil - anchor.render) / outputRate - anchor.latency
+        let segment = segments.last { $0.playerStart <= now } ?? first
+        let time = Double(segment.startFrame) / segment.rate + max(now - segment.playerStart, 0)
+        return (segment, min(time, segment.duration))
+    }
+
+    /// The output changed under the engine, which stopped: reconnect at the output's rate and carry on from what was
+    /// heard, paused if the device playing went away (unplugged headphones shouldn't switch to the speakers). A burst
+    /// of notifications is handled once; completions of the stopped player are ignored meanwhile (the tick still ends
+    /// the queue if nothing restarts).
     private func configurationChanged() {
-        guard (try? connectOutput()) != nil, let current, !reachedEnd else { return }
-        try? play(current, at: position, autoplay: isPlaying)
+        generation += 1
+        configurationTask?.cancel()
+        configurationTask = Task {
+            try? await Task.sleep(for: .milliseconds(60))
+            guard !Task.isCancelled else { return }
+            restart(deviceGone: outputDevice != 0 && !HAL.isAlive(outputDevice))
+        }
+    }
+
+    private func restart(deviceGone: Bool) {
+        // Nothing changed for the running graph: leave it (and its gapless player) alone.
+        if !deviceGone, engine.isRunning, liveOutput == (outputRate, outputDevice) { return }
+        let point = reachedEnd ? nil : heard()
+        guard (try? connectOutput()) != nil, let (segment, time) = point else { return }
+        let previous = current?.entryID
+        // A failure here is the output's, not the file's: stop rather than skip through the queue.
+        if (try? play(segment.item, at: time, autoplay: isPlaying && !deviceGone)) == nil { isPlaying = false }
+        if current?.entryID != previous, let current { onEvent?(.advanced(current)) }
+        onEvent?(.restarted)
+    }
+
+    /// As when the output changes under a playing engine (tests, self-tests).
+    public func simulateConfigurationChange(deviceGone: Bool = false) {
+        generation += 1
+        engine.stop()
+        restart(deviceGone: deviceGone)
     }
 
     // Callback factories: nonisolated, so the closures are not MainActor-isolated and may run on AVFAudio's threads.
