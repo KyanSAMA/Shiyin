@@ -141,6 +141,8 @@ enum SongSheet: Identifiable {
 
 @Observable final class UIState {
     var sidebar: SidebarItem = .songs
+    /// Left out of the sidebar (self-test screenshots).
+    var hiddenSidebar: Set<SidebarItem> = []
     var path: [Route] = []
     var search = ""
     var songSort = [KeyPathComparator(\TrackRow.title, comparator: .localizedStandard)]

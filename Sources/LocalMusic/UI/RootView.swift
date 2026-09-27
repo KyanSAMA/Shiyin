@@ -98,7 +98,7 @@ struct SidebarView: View {
         })) {
             ForEach([("资料库", SidebarItem.library), ("精选", SidebarItem.presets), ("工具", SidebarItem.tools)], id: \.0) { title, items in
                 Section(title) {
-                    ForEach(items) { row(item: $0, title: $0.title) }
+                    ForEach(items.filter { !ui.hiddenSidebar.contains($0) }) { row(item: $0, title: $0.title) }
                 }
             }
             if let playlists = model.library?.playlists, !playlists.isEmpty {

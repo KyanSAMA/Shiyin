@@ -93,6 +93,12 @@ final class SelfTestRunner {
             }
             model.ui.path = []
             try await settle()
+        case "hideSidebar":
+            model.ui.hiddenSidebar = Set(try (step["values"] as? [String] ?? []).map {
+                guard let item = SidebarItem(name: $0) else { throw SelfTestFailure(description: "unknown sidebar \($0)") }
+                return item
+            })
+            try await settle()
         case "search":
             model.ui.search = step.string("value") ?? ""
             try await settle()
