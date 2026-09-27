@@ -40,7 +40,7 @@
 
 需要 **macOS 27** 及以上、Apple 芯片的 Mac。
 
-1. 从 [Releases](https://github.com/KyanSAMA/local-music/releases) 下载 `Shiyin-*.dmg`，把「拾音」拖进「应用程序」
+1. 从 [Releases](https://github.com/KyanSAMA/Shiyin/releases) 下载 `Shiyin-*.dmg`，把「拾音」拖进「应用程序」
 2. 应用只做了 ad-hoc 签名，首次打开会被拦下：到「系统设置 → 隐私与安全性」点「仍要打开」，或在终端执行
    ```sh
    xattr -dr com.apple.quarantine /Applications/拾音.app
