@@ -51,6 +51,7 @@ public final class PlaybackEngine {
     public private(set) var position: Double = 0
     public private(set) var duration: Double = 0
     public private(set) var fileSampleRate: Double = 0
+    public private(set) var fileChannels = 0
     public var outputSampleRate: Double { gainNode.outputFormat(forBus: 0).sampleRate }
     public var volume: Float {
         get { engine.mainMixerNode.outputVolume }
@@ -378,6 +379,7 @@ public final class PlaybackEngine {
         current = segment.item
         duration = segment.duration
         fileSampleRate = segment.rate
+        fileChannels = Int(segment.file.processingFormat.channelCount)
         lookaheadDone = false
         gain.set(Self.level(segment), snap: snap)
         armed = nil
@@ -517,6 +519,7 @@ public final class PlaybackEngine {
         pendingSwitch = (item, file, time)
         let rate = file.processingFormat.sampleRate
         (current, position, duration, fileSampleRate, isPlaying) = (item, time, Double(file.length) / rate, rate, playing)
+        fileChannels = Int(file.processingFormat.channelCount)
     }
 
     /// Waits (up to 1.5 s) for the output unit to report the device's new rate.

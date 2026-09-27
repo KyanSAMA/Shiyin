@@ -1,3 +1,4 @@
+import AudioToolbox
 import CoreAudio
 import Dispatch
 
@@ -22,6 +23,27 @@ import Dispatch
     public func bindingID(_ uid: String) -> AudioDeviceID? { objects[uid] }
     public func graphRate(_ uid: String) -> Double? { nil }
 
+    public func setVolume(_ volume: Float, uid: String) throws {
+        precondition(Self.writesAllowed, "self-tests must not change a real device")
+        guard let id = objects[uid] else { throw OutputDeviceError.missing }
+        var address = Self.volumeAddress
+        var value = Float32(min(max(volume, 0), 1))
+        let status = AudioObjectSetPropertyData(id, &address, 0, nil, UInt32(MemoryLayout<Float32>.size), &value)
+        guard status == noErr else { throw OutputDeviceError.status(status) }
+    }
+
+    /// The volume the system's own controls move: the main one, else the stereo pair's (keeping their balance).
+    private static let volumeAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+                                                                  mScope: kAudioObjectPropertyScopeOutput, mElement: kAudioObjectPropertyElementMain)
+
+    /// The output volume, if the device lets it be set.
+    private static func volume(_ id: AudioDeviceID) -> Float? {
+        var address = volumeAddress, settable: DarwinBoolean = false, value = Float32(0), size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectHasProperty(id, &address), AudioObjectIsPropertySettable(id, &address, &settable) == noErr,
+              settable.boolValue, AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr else { return nil }
+        return value
+    }
+
     public func setNominalRate(_ rate: Double, uid: String) throws {
         precondition(Self.writesAllowed, "self-tests must not change a real device")
         guard let id = objects[uid] else { throw OutputDeviceError.missing }
@@ -44,6 +66,11 @@ import Dispatch
             found.append(info)
             ids[info.id] = id
             if let listener = listen(id, kAudioDevicePropertyNominalSampleRate, .rate(info.id)) { listeners.append(listener) }
+            // The system's volume is the main element's, or the stereo pair's.
+            for element in [kAudioObjectPropertyElementMain, 1, 2] {
+                if let listener = listen(id, kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeOutput, element: element,
+                                         .volume(info.id)) { listeners.append(listener) }
+            }
         }
         (devices, objects) = (found, ids)
         readDefault()
@@ -61,13 +88,17 @@ import Dispatch
         case .rate(let uid):
             guard let index = devices.firstIndex(where: { $0.id == uid }), let id = objects[uid] else { return }
             devices[index].nominalRate = Self.array(id, kAudioDevicePropertyNominalSampleRate, of: Float64.self).first ?? devices[index].nominalRate
+        case .volume(let uid):
+            guard let index = devices.firstIndex(where: { $0.id == uid }), let id = objects[uid] else { return }
+            devices[index].volume = Self.volume(id)
         }
         onChange?(change)
     }
 
-    private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+    private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
+                        element: AudioObjectPropertyElement = kAudioObjectPropertyElementMain,
                         _ change: OutputDeviceChange) -> (AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)? {
-        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: element)
         let block = Self.listener(self, change)
         return AudioObjectAddPropertyListenerBlock(object, &address, .main, block) == noErr ? (object, address, block) : nil
     }
@@ -85,7 +116,8 @@ import Dispatch
         let rates = standardRates.filter { rate in ranges.contains { $0.mMinimum <= rate && rate <= $0.mMaximum } }
         return OutputDeviceInfo(id: uid, name: string(id, kAudioObjectPropertyName) ?? uid,
                                 transport: OutputTransport(array(id, kAudioDevicePropertyTransportType, of: UInt32.self).first ?? 0),
-                                rates: rates, nominalRate: array(id, kAudioDevicePropertyNominalSampleRate, of: Float64.self).first ?? 0)
+                                rates: rates, nominalRate: array(id, kAudioDevicePropertyNominalSampleRate, of: Float64.self).first ?? 0,
+                                volume: volume(id))
     }
 
     private static let standardRates: [Double] = [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000]

@@ -411,6 +411,14 @@ final class SelfTestRunner {
             let uid = try step.required("uid")
             output.select(uid == "default" ? nil : uid)
             try await settle()
+        case "setPassthrough":
+            guard let output = model.output else { throw SelfTestFailure(description: "no output") }
+            await output.ready()
+            output.setPassthrough(step["value"] as? Bool ?? true)
+            try await settle()
+        case "showSignalPath":
+            model.ui.signalPathShown = step["value"] as? Bool ?? true
+            try await settle()
         case "setFollowRate":
             guard let output = model.output else { throw SelfTestFailure(description: "no output") }
             await output.ready()
@@ -859,7 +867,8 @@ final class SelfTestRunner {
         // "sheet": the innermost one (a sheet can present its own).
         let window = name == "main" ? mainWindow : name == "sheet" ? mainWindow?.attachedSheet.map { sequence(first: $0) { $0.attachedSheet }.reduce($0) { $1 } }
             : NSApp.windows.first {
-            $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || name == "settings" && $0.title.contains("设置"))
+            $0 !== mainWindow && $0.isVisible && ($0.identifier?.rawValue.localizedCaseInsensitiveContains(name) == true || name == "settings" && $0.title.contains("设置")
+                || name == "popover" && String(describing: type(of: $0)).contains("Popover"))
         }
         guard let window else { throw SelfTestFailure(description: "\(name) window not found") }
         return window
@@ -989,6 +998,8 @@ final class SelfTestRunner {
         ["devices": output.devices.map { ["uid": $0.id, "name": $0.name, "transport": $0.transport.rawValue, "rate": $0.nominalRate] as Step },
          "selected": output.settings.deviceUID ?? NSNull(), "effective": output.effective?.id ?? NSNull(),
          "defaultUID": output.defaultUID ?? NSNull(), "missing": output.missing ?? NSNull(),
+         "passthrough": output.settings.passthrough, "deviceVolume": output.effective?.volume ?? NSNull(),
+         "signalPath": output.signalPath.map { ["untouched": $0.untouched, "resampled": $0.resampled, "lines": $0.lines] as Step } ?? NSNull(),
          "followRate": output.settings.followRate, "following": output.following, "canFollow": output.canFollow,
          "switchFailure": output.switchFailure ?? NSNull(),
          "restores": Dictionary(uniqueKeysWithValues: output.restores.map { ($0.key, ["originalRate": $0.value.originalRate, "setRate": $0.value.setRate] as Step) }),
@@ -1002,7 +1013,8 @@ final class SelfTestRunner {
             "isPlaying": player.isPlaying, "position": player.position, "duration": player.duration,
             "fileSampleRate": engine.fileSampleRate, "outputSampleRate": engine.outputSampleRate,
             "gainDb": engine.current?.gainDb as Any? ?? NSNull(),
-            "volume": player.volume, "engineVolume": engine.volume, "lastError": player.lastError as Any? ?? NSNull(),
+            "volume": player.volume, "engineVolume": engine.volume, "shownVolume": player.shownVolume ?? NSNull(),
+            "passthrough": player.passthrough, "lastError": player.lastError as Any? ?? NSNull(),
             "skipNotice": player.skipNotice as Any? ?? NSNull(),
             "queue": ["count": player.queue.entries.count, "index": player.queue.index as Any? ?? NSNull(),
                       "upcomingTitles": player.queue.upcoming.prefix(5).compactMap { model.library?.index.tracks[$0.trackID]?.title },

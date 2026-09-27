@@ -31,6 +31,19 @@ struct OutputDevicesTests {
         #expect(RateChoice.target(fileRate: 44100, available: [48000, 96000]) == nil)   // switching would still resample
     }
 
+    @Test func describesTheSignalPath() {
+        var path = SignalPath(format: "flac", lossy: false, fileRate: 96000, bitDepth: 24, channels: 2, device: "外置耳机", outputRate: 96000,
+                              switching: false, gainDb: 0, softwareVolume: 1, deviceVolume: true)
+        #expect(path.untouched && path.lines.last == "拾音没有改动音频数据（直通）")
+        #expect(path.lines.contains("文件：FLAC · 96 kHz · 24 bit · 立体声") && path.lines.contains("采样率一致，未重采样"))
+        path.outputRate = 48000
+        #expect(!path.untouched && path.lines.contains("重采样 96 → 48 kHz"))
+        (path.outputRate, path.gainDb, path.deviceVolume, path.softwareVolume) = (96000, -3.2, false, 0.7)
+        #expect(path.lines.contains("响度均衡 -3.2 dB") && path.lines.contains("软件音量 70%") && !path.untouched)
+        (path.gainDb, path.softwareVolume, path.channels) = (0, 1, 1)
+        #expect(!path.untouched && path.lines.contains("单声道复制到左右声道"))
+    }
+
     @Test func settingsRoundTrip() throws {
         var settings = OutputSettings()
         (settings.deviceUID, settings.deviceName, settings.followRate) = ("fake-dac", "USB DAC", true)

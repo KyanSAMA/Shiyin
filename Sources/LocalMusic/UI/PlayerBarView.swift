@@ -17,7 +17,8 @@ struct PlayerBarView: View {
                 .frame(maxWidth: 520)
                 Spacer(minLength: 0)
                 PageToggles(model: model, current: player.current?.id)
-                if let loudness = model.loudness { NormalizationMenu(loudness: loudness) }
+                if let output = model.output, player.current != nil { SignalPathButton(output: output, player: player, ui: model.ui) }
+                if let loudness = model.loudness { NormalizationMenu(loudness: loudness, passthrough: player.passthrough) }
                 VolumeControl(player: player)
                     .frame(width: 130)
             }
@@ -167,8 +168,54 @@ private struct ProgressRow: View {
     }
 }
 
+/// The output rate; opens what happens to the audio on its way out. Tinted when nothing does.
+private struct SignalPathButton: View {
+    let output: OutputModel
+    let player: PlayerModel
+    let ui: UIState
+
+    var body: some View {
+        let untouched = output.signalPath?.untouched == true
+        Button { ui.signalPathShown.toggle() } label: {
+            Text(String(format: "%gk", player.outputRate / 1000))
+                .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .padding(.horizontal, 6)
+                .frame(height: 20)
+                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.tertiary))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(untouched ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+        .help("信号路径")
+        .popover(isPresented: Binding(get: { ui.signalPathShown }, set: { ui.signalPathShown = $0 }), arrowEdge: .top) {
+            SignalPathView(path: output.signalPath)
+        }
+        .onDisappear { ui.signalPathShown = false }   // nothing playing: don't pop up again with the next song
+    }
+}
+
+struct SignalPathView: View {
+    let path: SignalPath?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("信号路径").font(.headline)
+            if let lines = path?.lines {
+                ForEach(Array(lines.dropLast().enumerated()), id: \.offset) { Text($0.element) }
+                Divider()
+                Text(lines.last ?? "").fontWeight(.semibold).foregroundStyle(path?.untouched == true ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                Text("之后的系统与设备处理（如扬声器音效、蓝牙编码）不在拾音控制范围内。")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .font(.system(size: 12))
+        .padding(14)
+        .frame(width: 300, alignment: .leading)
+    }
+}
+
 private struct NormalizationMenu: View {
     let loudness: LoudnessModel
+    let passthrough: Bool
 
     var body: some View {
         Menu {
@@ -180,8 +227,9 @@ private struct NormalizationMenu: View {
         .buttonStyle(IconButtonStyle(side: 30))
         .menuIndicator(.hidden)
         .fixedSize()
-        .foregroundStyle(loudness.mode == .off ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
-        .help("响度均衡：\(loudness.mode.title)")
+        .foregroundStyle(loudness.mode == .off || passthrough ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+        .disabled(passthrough)
+        .help(passthrough ? "原样输出开启时不做响度均衡（设置已保留）" : "响度均衡：\(loudness.mode.title)")
     }
 }
 
@@ -211,11 +259,19 @@ private struct VolumeControl: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            Slider(value: Binding(get: { Double(player.volume) }, set: { player.setVolume(Float($0)) }), in: 0...1)
-                .controlSize(.mini)
+            if let volume = player.shownVolume {
+                Image(systemName: volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Slider(value: Binding(get: { Double(volume) }, set: { player.setVolume(Float($0)) }), in: 0...1)
+                    .controlSize(.mini)
+                    .help(player.passthrough ? "原样输出：调的是设备的音量" : "音量")
+            } else {
+                Text("在设备上调音量")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .help("原样输出时拾音不调音量，这个设备也没有可调的音量：请用设备或耳放上的旋钮。")
+            }
         }
     }
 }

@@ -574,6 +574,36 @@ struct PlaybackEngineTests {
         #expect(rig.engine.current == c && rig.engine.outputSampleRate == 44100 && rig.engine.switchFailure == nil)
     }
 
+    /// At 0 dB and full volume, an integer PCM file at the output's rate comes out sample for sample as decoded.
+    @Test(arguments: [16, 24]) func passesAudioThroughUntouched(bits: Int) async throws {
+        let rig = try OfflineRig()
+        let url = rig.dir.appending(path: "int\(bits).wav"), frames = 48000
+        var rng = SystemRandomNumberGenerator()
+        let scale = Float(1 << (bits - 1))
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2,
+                                       AVLinearPCMBitDepthKey: bits, AVLinearPCMIsFloatKey: false]
+        let source = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(frames))!
+        buffer.frameLength = buffer.frameCapacity
+        for c in 0..<2 {
+            for i in 0..<frames {
+                // Integer steps, including the extremes.
+                let step = i < 4 ? [-scale, scale - 1, -1, 1][i] : Float(Int.random(in: -Int(scale)..<Int(scale), using: &rng))
+                buffer.floatChannelData![c][i] = step / scale
+            }
+        }
+        try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false).write(from: buffer)
+        let decoded = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(frames))!
+        try AVAudioFile(forReading: url).read(into: decoded)
+
+        try rig.engine.play(PlaybackItem(entryID: 1, trackID: 1, url: url))
+        try await rig.render(seconds: 1.1)
+        let start = try #require(rig.captured.firstIndex { $0 != 0 })
+        let expected = Array(UnsafeBufferPointer(start: decoded.floatChannelData![0], count: frames))
+        let rendered = Array(rig.captured[start..<start + frames])
+        #expect(rendered == expected, "first difference at \(rendered.indices.first { rendered[$0] != expected[$0] } ?? -1)")
+    }
+
     @Test func pausesAndResumesInPlace() async throws {
         let rig = try OfflineRig()
         let tone = try rig.item("tone", frames: 0..<96000) { ToneFile.sine($0) }

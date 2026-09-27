@@ -37,9 +37,9 @@ struct AppCommands: Commands {
                 Button("上一首") { player.previous() }
                     .keyboardShortcut(.leftArrow)
                 Divider()
-                Button("增大音量") { player.setVolume(player.volume + 0.1) }
+                Button("增大音量") { player.setVolume((player.shownVolume ?? 0) + 0.1) }
                     .keyboardShortcut(.upArrow)
-                Button("减小音量") { player.setVolume(player.volume - 0.1) }
+                Button("减小音量") { player.setVolume((player.shownVolume ?? 0) - 0.1) }
                     .keyboardShortcut(.downArrow)
                 Divider()
                 if let library = model.library {
@@ -55,7 +55,7 @@ struct AppCommands: Commands {
                     Text("单曲循环").tag(RepeatMode.one)
                 }
             }
-            if let loudness = model.loudness { NormalizationPicker(loudness: loudness) }
+            if let loudness = model.loudness { NormalizationPicker(loudness: loudness).disabled(model.player?.passthrough == true) }
         }
     }
 }

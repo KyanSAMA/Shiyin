@@ -11,6 +11,16 @@ import LocalMusicCore
     private(set) var position: Double = 0
     private(set) var duration: Double = 0
     private(set) var volume: Float = 1
+    /// 原样输出: no gain and the app's volume at 100 %; the volume controls move the device's instead.
+    private(set) var passthrough = false
+    /// What the engine does to the playing song, for the signal path: the rate it leaves at (the old one until a
+    /// switch is done), the gain, the file's channels.
+    private(set) var outputRate: Double = 0
+    private(set) var appliedGainDb: Float = 0
+    private(set) var fileChannels = 0
+    private(set) var switching = false
+    @ObservationIgnored var deviceVolume: (() -> Float?)?
+    @ObservationIgnored var setDeviceVolume: ((Float) -> Void)?
     private(set) var lastError: String?
     /// Following songs' rates stopped: the device wouldn't switch.
     private(set) var switchFailure: String?
@@ -56,7 +66,7 @@ import LocalMusicCore
         self.loudness = loudness
         self.muted = muted
         engine = try PlaybackEngine()
-        engine.volume = muted ? 0 : volume
+        applyVolume()
         engine.nextItem = { [weak self] in self?.nextPlayable() }
         engine.onEvent = { [weak self] in self?.handle($0) }
     }
@@ -156,6 +166,7 @@ import LocalMusicCore
             if item.entryID == playing, !modeChanged, loudness?.isMeasured(item.trackID) == false { return item.gainDb }
             return gainDb(for: item.trackID)
         }
+        appliedGainDb = engine.current?.gainDb ?? 0
     }
 
     /// Moves playback to another output, carrying on from what was heard; false if it failed (paused where it was).
@@ -164,11 +175,23 @@ import LocalMusicCore
         return lastError == nil
     }
 
+    /// The volume the controls show and move: the app's, or the device's while passing through (nil: it has none).
+    var shownVolume: Float? { passthrough ? deviceVolume?() : volume }
+
     func setVolume(_ value: Float) {
+        if passthrough { return setDeviceVolume?(min(max(value, 0), 1)) ?? () }
         volume = min(max(value, 0), 1)
-        engine.volume = muted ? 0 : volume
+        applyVolume()
         scheduleSave()
     }
+
+    func setPassthrough(_ on: Bool) {
+        passthrough = on
+        applyVolume()
+        gainsChanged(modeChanged: true)
+    }
+
+    private func applyVolume() { engine.volume = muted ? 0 : passthrough ? 1 : volume }
 
     // MARK: Persistence
 
@@ -179,7 +202,7 @@ import LocalMusicCore
               state.queue.index.map(state.queue.entries.indices.contains) ?? true, queue.entries.isEmpty else { return }
         queue = state.queue
         volume = min(max(state.volume, 0), 1)
-        engine.volume = muted ? 0 : volume
+        applyVolume()
         restoredPosition = state.position
         loadRestored()
     }
@@ -252,7 +275,7 @@ import LocalMusicCore
     }
 
     private func gainDb(for track: Int64) -> Float {
-        loudness?.gainDb(for: track) ?? 0
+        passthrough ? 0 : loudness?.gainDb(for: track) ?? 0
     }
 
     /// Plays the current entry; an unplayable one is skipped, at most once per queue entry so an all-bad queue on
@@ -317,6 +340,8 @@ import LocalMusicCore
         duration = engine.duration
         position = engine.position
         switchFailure = engine.switchFailure
+        (outputRate, appliedGainDb, fileChannels, switching) = (engine.outputSampleRate, engine.current?.gainDb ?? 0, engine.fileChannels,
+                                                               engine.isSwitching)
         loadLyricsIfNeeded()
         updateLyricIndex()
         prioritizeLoudness()

@@ -49,9 +49,11 @@ public struct OutputDeviceInfo: Sendable, Equatable, Identifiable, Codable {
     /// Nominal rates the device offers.
     public var rates: [Double]
     public var nominalRate: Double
+    /// The device's own volume (0…1); nil when it has none to set.
+    public var volume: Float?
 
-    public init(id: String, name: String, transport: OutputTransport, rates: [Double], nominalRate: Double) {
-        (self.id, self.name, self.transport, self.rates, self.nominalRate) = (id, name, transport, rates, nominalRate)
+    public init(id: String, name: String, transport: OutputTransport, rates: [Double], nominalRate: Double, volume: Float? = nil) {
+        (self.id, self.name, self.transport, self.rates, self.nominalRate, self.volume) = (id, name, transport, rates, nominalRate, volume)
     }
 }
 
@@ -62,7 +64,7 @@ public enum OutputDeviceError: Error {
 }
 
 public enum OutputDeviceChange: Sendable, Equatable {
-    case list, defaultDevice, rate(String)
+    case list, defaultDevice, rate(String), volume(String)
 }
 
 /// The Mac's output devices, or stand-ins (tests, self-tests).
@@ -76,6 +78,7 @@ public enum OutputDeviceChange: Sendable, Equatable {
     func graphRate(_ uid: String) -> Double?
     /// Sets the device's clock; the change arrives as `.rate(uid)`.
     func setNominalRate(_ rate: Double, uid: String) throws
+    func setVolume(_ volume: Float, uid: String) throws
 }
 
 public enum RateChoice {

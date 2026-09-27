@@ -162,6 +162,7 @@ enum SongSheet: Identifiable {
     var enrichFilter = EnrichFilter.missingLyrics
     /// 0 曲库, 1 在线资料, 2 导入.
     var settingsTab = 0
+    var signalPathShown = false
     var enrichSelection: Set<Int64> = []
     /// What songs are being dragged over in the sidebar.
     var dropTarget: DropTarget?

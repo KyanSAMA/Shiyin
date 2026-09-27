@@ -25,15 +25,18 @@ import LocalMusicCore
 
     init(source: OutputDevices, player: PlayerModel, store: LibraryStore) {
         (self.source, self.player, self.store) = (source, player, store)
-        source.onChange = { [weak self] _ in self?.changed() }
+        source.onChange = { [weak self] in self?.changed($0) }
         (devices, defaultUID) = (source.devices, source.defaultUID)
         player.engine.switchRate = { [weak self] rate in try await self?.switchDevice(to: rate) }
+        player.deviceVolume = { [weak self] in self?.effective?.volume }
+        player.setDeviceVolume = { [weak self] in self?.setDeviceVolume($0) }
         loading = Task {
             if let saved = try? await store.setting(OutputSettings.key, as: OutputSettings.self) { settings = saved }
             let saved = (try? await store.setting(RateRestore.key, as: [RateRestore].self)) ?? []
             restores = Dictionary(saved.map { ($0.uid, $0) }, uniquingKeysWith: { first, _ in first })
             if putBack(except: nil) { saveRestores() }   // left switched by a crash
             bind(force: false)
+            player.setPassthrough(settings.passthrough)
         }
     }
 
@@ -75,6 +78,36 @@ import LocalMusicCore
         }
     }
 
+    /// 原样输出. Turning it on lowers the device's volume by the app's (which goes to 100 %), so it doesn't get louder.
+    /// Turning it off raises the device back as far as it can, so the level heard stays the same either way.
+    func setPassthrough(_ on: Bool) {
+        if on != player.passthrough, let volume = effective?.volume, player.volume > 0 {
+            setDeviceVolume(on ? volume * player.volume : min(volume / player.volume, 1))
+        }
+        settings.passthrough = on
+        saveSettings()
+        player.setPassthrough(on)
+    }
+
+    /// What happens to the playing song on its way out.
+    var signalPath: SignalPath? {
+        guard let track = player.current else { return nil }
+        let codec = track.codec ?? track.format
+        return SignalPath(format: ["pcm", "flac"].contains(codec) ? track.format : codec, lossy: ["mp3", "aac"].contains(codec),
+                          fileRate: Double(track.sampleRate ?? 0), bitDepth: track.bitDepth, channels: player.fileChannels,
+                          device: effective?.name ?? "输出设备", outputRate: player.outputRate, switching: player.switching,
+                          gainDb: player.appliedGainDb, softwareVolume: player.passthrough ? 1 : player.volume, deviceVolume: player.passthrough)
+    }
+
+    /// Turning 原样输出 on would get louder with nothing to lower on the device: ask first.
+    var passthroughNeedsWarning: Bool { effective?.volume == nil && player.volume < 0.5 }
+    var confirmingPassthrough = false
+
+    private func setDeviceVolume(_ volume: Float) {
+        guard let uid = effective?.id, (try? source.setVolume(volume, uid: uid)) != nil else { return }
+        effective?.volume = volume   // the device reports it shortly
+    }
+
     /// Puts the devices' rates back before quitting.
     func restoreBeforeQuit() {
         guard putBack(except: nil) else { return }
@@ -88,7 +121,12 @@ import LocalMusicCore
 
     /// A device leaving posts several changes (the default moves, the list shrinks), in either order: act once they've
     /// settled, so playback pauses rather than moving to the new default.
-    private func changed() {
+    private func changed(_ change: OutputDeviceChange) {
+        if case .volume(let uid) = change {   // at once: the volume slider follows it
+            devices = source.devices
+            if uid == effective?.id { effective = devices.first { $0.id == uid } }
+            return
+        }
         pending?.cancel()
         pending = Task {
             try? await Task.sleep(for: .milliseconds(60))

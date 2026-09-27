@@ -109,14 +109,19 @@ private struct PlaybackSettingsView: View {
             Section {
                 Toggle("采样率跟随歌曲", isOn: Binding(get: { output.settings.followRate }, set: { output.setFollowRate($0) }))
                     .disabled(!output.canFollow)
+                Toggle("原样输出", isOn: Binding(get: { output.settings.passthrough }, set: { on in
+                    if on, output.passthroughNeedsWarning { output.confirmingPassthrough = true } else { output.setPassthrough(on) }
+                }))
             } header: {
                 Text("音质")
             } footer: {
-                Text(followNote).foregroundStyle(.secondary)
+                Text(followNote + "\n原样输出：不做响度均衡，拾音的音量固定为 100%，音量滑块改调设备自己的音量；配合采样率跟随，拾音就不改动音频数据。播放条上的采样率标签可以查看信号路径。")
+                    .foregroundStyle(.secondary)
             }
             if let loudness {
+                let passthrough = output.settings.passthrough
                 Section {
-                    NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented)
+                    NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented).disabled(passthrough)
                     let progress = loudness.progress
                     if progress.total > 0 {
                         LabeledContent("已分析", value: "\(progress.analyzed) / \(progress.total) 首")
@@ -126,12 +131,18 @@ private struct PlaybackSettingsView: View {
                 } header: {
                     Text("响度均衡")
                 } footer: {
-                    Text("把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益（只降不升）。")
+                    Text((passthrough ? "原样输出开启时不做响度均衡（设置已保留）。" : "")
+                         + "把每首歌（或整张专辑）调到 −18 LUFS 的相近响度，峰值不削波。未分析完的歌先用曲库的中位增益（只降不升）。")
                         .foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog("音量将变为 100%", isPresented: Binding(get: { output.confirmingPassthrough }, set: { output.confirmingPassthrough = $0 })) {
+            Button("打开原样输出") { output.setPassthrough(true) }
+        } message: {
+            Text("这个设备没有可调的音量，打开后拾音不再调音量，声音会变大。请先调低设备或耳放的音量。")
+        }
     }
 }
 
@@ -140,7 +151,7 @@ private extension PlaybackSettingsView {
         let name = output.effective?.name ?? "输出设备"
         guard output.canFollow else { return "\(name)是蓝牙或 AirPlay 等设备，采样率由它自己决定，无法跟随歌曲。" }
         let failure = output.switchFailure.map { "\($0)，已改回重采样播放。" }
-        return (failure ?? "") + "打开后，播放时把\(name)切到歌曲自己的采样率（不支持时取最接近的整数倍），省去重采样。采样率不同的两首歌之间会停顿一下，其他应用的声音也会跟着用这个采样率；关闭或退出拾音时恢复原来的设置。"
+        return (failure ?? "") + "打开后，播放时把\(name)切到歌曲自己的采样率（不支持时取与它成整数倍的采样率，都没有就不切），省去重采样。采样率不同的两首歌之间会停顿一下，其他应用的声音也会跟着用这个采样率；关闭或退出拾音时恢复原来的设置。"
     }
 }
 

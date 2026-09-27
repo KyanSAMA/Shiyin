@@ -15,9 +15,11 @@ import Foundation
     private let stateURL: URL?
 
     public static let presets = [
-        OutputDeviceInfo(id: "fake-speakers", name: "MacBook Pro扬声器", transport: .builtIn, rates: [44100, 48000, 88200, 96000], nominalRate: 48000),
-        OutputDeviceInfo(id: "fake-headphones", name: "外置耳机", transport: .builtIn, rates: [44100, 48000, 88200, 96000], nominalRate: 48000),
-        OutputDeviceInfo(id: "fake-airpods", name: "AirPods", transport: .bluetooth, rates: [48000], nominalRate: 48000),
+        OutputDeviceInfo(id: "fake-speakers", name: "MacBook Pro扬声器", transport: .builtIn, rates: [44100, 48000, 88200, 96000],
+                         nominalRate: 48000, volume: 0.5),
+        OutputDeviceInfo(id: "fake-headphones", name: "外置耳机", transport: .builtIn, rates: [44100, 48000, 88200, 96000],
+                         nominalRate: 48000, volume: 0.5),
+        OutputDeviceInfo(id: "fake-airpods", name: "AirPods", transport: .bluetooth, rates: [48000], nominalRate: 48000, volume: 0.5),
         OutputDeviceInfo(id: "fake-dac", name: "USB DAC", transport: .usb,
                          rates: [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000], nominalRate: 48000),
     ]
@@ -40,6 +42,13 @@ import Foundation
         devices[index].nominalRate = rate
         if let stateURL { try? JSONEncoder().encode(devices).write(to: stateURL) }
         onChange?(.rate(uid))
+    }
+
+    public func setVolume(_ volume: Float, uid: String) throws {
+        guard let index = devices.firstIndex(where: { $0.id == uid }), devices[index].volume != nil else { throw OutputDeviceError.missing }
+        devices[index].volume = min(max(volume, 0), 1)
+        if let stateURL { try? JSONEncoder().encode(devices).write(to: stateURL) }
+        onChange?(.volume(uid))
     }
 
     public func unplug(_ uid: String) {
