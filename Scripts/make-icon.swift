@@ -35,15 +35,15 @@ func render(_ pixels: Int) -> Data {
     color(0xF5EFE6).setFill()
     shape.fill()
     // The sleeve is a little larger than the record, as a real LP's.
-    circle(640, 512, 235, 0x16161A)
+    circle(647, 512, 235, 0x16161A)
     NSColor(white: 1, alpha: 0.1).setStroke()
     for r in stride(from: 218.0, to: 99, by: -17.6) {
-        let groove = NSBezierPath(ovalIn: NSRect(x: 640 - r, y: 512 - r, width: 2 * r, height: 2 * r))
+        let groove = NSBezierPath(ovalIn: NSRect(x: 647 - r, y: 512 - r, width: 2 * r, height: 2 * r))
         groove.lineWidth = 3
         groove.stroke()
     }
-    circle(640, 512, 80, 0xFFC53D)
-    circle(640, 512, 11, 0x16161A)
+    circle(647, 512, 80, 0xFFC53D)
+    circle(647, 512, 11, 0x16161A)
     NSGraphicsContext.saveGraphicsState()
     let sleeve = NSShadow()
     sleeve.shadowColor = .black.withAlphaComponent(0.18)
@@ -51,11 +51,11 @@ func render(_ pixels: Int) -> Data {
     sleeve.shadowBlurRadius = 24
     sleeve.set()
     color(0xF0563A).setFill()
-    NSBezierPath(roundedRect: NSRect(x: 140, y: 252, width: 520, height: 520), xRadius: 34, yRadius: 34).fill()
+    NSBezierPath(roundedRect: NSRect(x: 147, y: 252, width: 520, height: 520), xRadius: 34, yRadius: 34).fill()
     NSGraphicsContext.restoreGraphicsState()
-    circle(400, 512, 32, 0xF5EFE6)
+    circle(407, 512, 32, 0xF5EFE6)
     NSColor(white: 1, alpha: 0.22).setFill()
-    NSBezierPath(roundedRect: NSRect(x: 178, y: 292, width: 130, height: 26), xRadius: 13, yRadius: 13).fill()
+    NSBezierPath(roundedRect: NSRect(x: 185, y: 292, width: 130, height: 26), xRadius: 13, yRadius: 13).fill()
     NSGraphicsContext.restoreGraphicsState()
     NSGraphicsContext.restoreGraphicsState()
     return rep.representation(using: .png, properties: [:])!
