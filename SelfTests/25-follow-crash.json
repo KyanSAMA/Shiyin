@@ -1,0 +1,16 @@
+{
+  "timeout": 60,
+  "window": { "width": 1280, "height": 800 },
+  "relaunch": "relaunch/25-follow-crash.json",
+  "steps": [
+    { "do": "fs", "op": "copy", "from": "@fixtures/library", "to": "@out/lib" },
+    { "do": "startLibrary", "include": ["@out/lib"], "exclude": ["@out/lib/Music"] },
+    { "do": "setOutputDevice", "uid": "fake-headphones" },
+    { "do": "setFollowRate", "value": true },
+    { "do": "play", "title": "ID3v2.4 测试" },
+    { "do": "waitSwitch" },
+    { "do": "assert", "path": "output.devices.1.rate", "equals": 44100 },
+    { "do": "assert", "path": "output.restores.fake-headphones.setRate", "equals": 44100 },
+    { "do": "abort" }
+  ]
+}

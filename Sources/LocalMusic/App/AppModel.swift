@@ -285,7 +285,9 @@ enum SongSheet: Identifiable {
             }
             loudness?.onGainsChange = { [weak player] in player?.gainsChanged(modeChanged: $0) }
             // Self-tests never touch the Mac's real devices.
-            let devices: OutputDevices = options.isSelfTest ? FakeOutputDevices() : HALOutputDevices()
+            HALOutputDevices.writesAllowed = !options.isSelfTest
+            let devices: OutputDevices = options.isSelfTest
+                ? FakeOutputDevices(state: paths.data.appending(path: "fake-output.json")) : HALOutputDevices()
             output = OutputModel(source: devices, player: player!, store: store)
             let fixtures = options.onlineFixturesDir
             client = OnlineClient(configuration: fixtures.map(OnlineFixtures.configuration) ?? .ephemeral)

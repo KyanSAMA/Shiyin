@@ -1,0 +1,9 @@
+{
+  "timeout": 30,
+  "window": { "width": 1280, "height": 800 },
+  "steps": [
+    { "do": "setOutputDevice", "uid": "fake-headphones" },
+    { "do": "assert", "path": "output.devices.1.rate", "equals": 48000 },
+    { "do": "assert", "path": "output.restores", "equals": {} }
+  ]
+}

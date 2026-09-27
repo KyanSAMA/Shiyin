@@ -106,6 +106,14 @@ private struct PlaybackSettingsView: View {
                       "拔掉正在播放的设备时会暂停，不会改从扬声器外放。"].compactMap { $0 }.joined())
                     .foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("采样率跟随歌曲", isOn: Binding(get: { output.settings.followRate }, set: { output.setFollowRate($0) }))
+                    .disabled(!output.canFollow)
+            } header: {
+                Text("音质")
+            } footer: {
+                Text(followNote).foregroundStyle(.secondary)
+            }
             if let loudness {
                 Section {
                     NormalizationPicker(loudness: loudness, title: "模式").pickerStyle(.segmented)
@@ -124,6 +132,15 @@ private struct PlaybackSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+private extension PlaybackSettingsView {
+    var followNote: String {
+        let name = output.effective?.name ?? "输出设备"
+        guard output.canFollow else { return "\(name)是蓝牙或 AirPlay 等设备，采样率由它自己决定，无法跟随歌曲。" }
+        let failure = output.switchFailure.map { "\($0)，已改回重采样播放。" }
+        return (failure ?? "") + "打开后，播放时把\(name)切到歌曲自己的采样率（不支持时取最接近的整数倍），省去重采样。采样率不同的两首歌之间会停顿一下，其他应用的声音也会跟着用这个采样率；关闭或退出拾音时恢复原来的设置。"
     }
 }
 

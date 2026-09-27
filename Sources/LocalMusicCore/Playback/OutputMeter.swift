@@ -16,16 +16,18 @@ public final class OutputMeter: Sendable {
         public var integratedLufs: Double?
     }
 
+    /// Seconds rather than frames, as the rate can change mid-measurement (following songs' rates).
     private struct State {
         var rate = 0.0
         var frames = 0
+        var seconds = 0.0
         var sumSquares: [Double] = []
         var peak: Float = 0
         var maxStep: Float = 0
         var last: [Float] = []
         var sounded = false
-        var zeroRun = 0
-        var longestGap = 0
+        var zeroRun = 0.0
+        var longestGap = 0.0
         var loudness: LoudnessAnalyzer?
     }
 
@@ -47,8 +49,8 @@ public final class OutputMeter: Sendable {
             return span.withUnsafeBufferPointer(Array.init)
         }
         state.withLock { s in
-            if s.sumSquares.count != channels {
-                s.sumSquares = Array(repeating: 0, count: channels)
+            if s.sumSquares.count != channels || s.rate != buffer.format.sampleRate {
+                if s.sumSquares.count != channels { s.sumSquares = Array(repeating: 0, count: channels) }
                 s.last = Array(repeating: .nan, count: channels)
                 s.loudness = LoudnessAnalyzer(sampleRate: buffer.format.sampleRate, channels: channels)
             }
@@ -68,16 +70,18 @@ public final class OutputMeter: Sendable {
                 s.last[c] = last
                 s.sumSquares[c] += sum
             }
+            let period = 1 / buffer.format.sampleRate
             for f in 0..<frames {
                 if sounding[f] {
                     s.longestGap = max(s.longestGap, s.zeroRun)
                     s.zeroRun = 0
                     s.sounded = true
                 } else if s.sounded {
-                    s.zeroRun += 1
+                    s.zeroRun += period
                 }
             }
             s.frames += frames
+            s.seconds += Double(frames) * period
         }
     }
 
@@ -86,10 +90,10 @@ public final class OutputMeter: Sendable {
             func dbfs(_ power: Double) -> Double { power > 0 ? max(10 * log10(power), -120) : -120 }
             let frames = Double(max(s.frames, 1))
             let channelPower = s.sumSquares.map { $0 / frames }
-            return Reading(seconds: s.rate > 0 ? Double(s.frames) / s.rate : 0,
+            return Reading(seconds: s.seconds,
                            rmsDbfs: dbfs(channelPower.reduce(0, +) / Double(max(channelPower.count, 1))),
                            peakDbfs: dbfs(Double(s.peak * s.peak)), maxStep: Double(s.maxStep),
-                           longestGapMs: s.rate > 0 ? Double(s.longestGap) / s.rate * 1000 : 0,
+                           longestGapMs: s.longestGap * 1000,
                            channelRmsDbfs: channelPower.map(dbfs), integratedLufs: s.loudness?.result.integrated)
         }
     }

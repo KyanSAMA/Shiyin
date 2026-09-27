@@ -12,6 +12,8 @@ import LocalMusicCore
     private(set) var duration: Double = 0
     private(set) var volume: Float = 1
     private(set) var lastError: String?
+    /// Following songs' rates stopped: the device wouldn't switch.
+    private(set) var switchFailure: String?
     private(set) var lyrics: Lyrics?
     /// True between a track change and its lyrics arriving (so the page doesn't flash 暂无歌词).
     private(set) var lyricsLoading = false
@@ -314,6 +316,7 @@ import LocalMusicCore
         isPlaying = engine.isPlaying
         duration = engine.duration
         position = engine.position
+        switchFailure = engine.switchFailure
         loadLyricsIfNeeded()
         updateLyricIndex()
         prioritizeLoudness()

@@ -16,8 +16,21 @@ import Dispatch
         reload()
     }
 
+    /// Off in self-tests, which must never change the Mac's real devices.
+    public static var writesAllowed = true
+
     public func bindingID(_ uid: String) -> AudioDeviceID? { objects[uid] }
     public func graphRate(_ uid: String) -> Double? { nil }
+
+    public func setNominalRate(_ rate: Double, uid: String) throws {
+        precondition(Self.writesAllowed, "self-tests must not change a real device")
+        guard let id = objects[uid] else { throw OutputDeviceError.missing }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var value = Float64(rate)
+        let status = AudioObjectSetPropertyData(id, &address, 0, nil, UInt32(MemoryLayout<Float64>.size), &value)
+        guard status == noErr else { throw OutputDeviceError.status(status) }
+    }
 
     private func reload() {
         for (object, address, block) in listeners {

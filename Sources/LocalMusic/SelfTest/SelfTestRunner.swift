@@ -411,6 +411,17 @@ final class SelfTestRunner {
             let uid = try step.required("uid")
             output.select(uid == "default" ? nil : uid)
             try await settle()
+        case "setFollowRate":
+            guard let output = model.output else { throw SelfTestFailure(description: "no output") }
+            await output.ready()
+            output.setFollowRate(step["value"] as? Bool ?? true)
+            try await settle()
+        case "waitSwitch":
+            // Until the engine's rate switch has finished (≤ 5 s).
+            let engine = try player().engine
+            for _ in 0..<250 where engine.isSwitching { try await Task.sleep(for: .milliseconds(20)) }
+            if engine.isSwitching { throw SelfTestFailure(description: "rate switch still running after 5 s") }
+            try await settle()
         case "fakeOutput":
             // Plugs, unplugs or makes default a stand-in device (`op`: plug / unplug / setDefault, `uid`).
             guard let fake = model.output?.source as? FakeOutputDevices else { throw SelfTestFailure(description: "no stand-in devices") }
@@ -419,6 +430,7 @@ final class SelfTestRunner {
             case "plug": fake.plug(uid)
             case "unplug": fake.unplug(uid)
             case "setDefault": fake.setDefault(uid)
+            case "failNextSwitch": fake.failNextSwitch = true
             case let op: throw SelfTestFailure(description: "unknown fakeOutput op \(op)")
             }
             await model.output?.settled()
@@ -490,6 +502,10 @@ final class SelfTestRunner {
             try await settle()
         case "setVolume":
             try player().setVolume(Float(step.number("value") ?? 1))
+        case "abort":
+            // As a crash: the report, then gone, without the quit path.
+            finish(status: "pass", error: nil)
+            exit(0)
         case "quit":
             // The real quit path (saving playback on the way out); the report is written first, as the app exits there.
             finish(status: "pass", error: nil)
@@ -972,7 +988,11 @@ final class SelfTestRunner {
     private func outputState(_ output: OutputModel) -> Step {
         ["devices": output.devices.map { ["uid": $0.id, "name": $0.name, "transport": $0.transport.rawValue, "rate": $0.nominalRate] as Step },
          "selected": output.settings.deviceUID ?? NSNull(), "effective": output.effective?.id ?? NSNull(),
-         "defaultUID": output.defaultUID ?? NSNull(), "missing": output.missing ?? NSNull()]
+         "defaultUID": output.defaultUID ?? NSNull(), "missing": output.missing ?? NSNull(),
+         "followRate": output.settings.followRate, "following": output.following, "canFollow": output.canFollow,
+         "switchFailure": output.switchFailure ?? NSNull(),
+         "restores": Dictionary(uniqueKeysWithValues: output.restores.map { ($0.key, ["originalRate": $0.value.originalRate, "setRate": $0.value.setRate] as Step) }),
+         "lastSwitch": output.lastSwitch.map { ["from": $0.from, "to": $0.to, "ms": $0.seconds * 1000] as Step } ?? NSNull()]
     }
 
     private func playerState(_ player: PlayerModel) -> Step {

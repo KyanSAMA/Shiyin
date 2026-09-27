@@ -174,6 +174,12 @@ private final class OfflineRig {
     func render(seconds: Double, chunk: AVAudioFrameCount = 256, tick: Bool = true) async throws {
         var remaining = Int(seconds * 48000)
         while remaining > 0 {
+            guard engine.isRunning else {   // a rate switch in progress: silence, as on the device
+                captured += [Float](repeating: 0, count: Int(chunk))
+                remaining -= Int(chunk)
+                try await Task.sleep(for: .milliseconds(1))
+                continue
+            }
             let buffer = try engine.render(frames: chunk)
             meter.process(buffer)
             captured += UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength))
@@ -181,6 +187,11 @@ private final class OfflineRig {
             remaining -= Int(chunk)
             await Task.yield()
         }
+    }
+
+    /// Waits for a rate switch to finish.
+    func switched() async throws {
+        for _ in 0..<200 where engine.isSwitching { try await Task.sleep(for: .milliseconds(10)) }
     }
 
     var advanced: Int { events.filter { if case .advanced = $0 { true } else { false } }.count }
@@ -469,6 +480,98 @@ struct PlaybackEngineTests {
         try await rig.render(seconds: 0.5)
         #expect(abs(rig.engine.position - (1 + 0.5 * 48000 / 44100)) < 0.02)   // the rig counts frames at 48 kHz
         #expect(rig.meter.reading.rmsDbfs > -12)
+    }
+
+    /// Follows songs' rates the way the app does on a device offering these.
+    private func follow(_ rig: OfflineRig, rates: [Double] = [44100, 48000, 88200, 96000], delay: Duration = .zero, fail: Bool = false) {
+        rig.engine.preferredRate = { RateChoice.target(fileRate: $0, available: rates) }
+        rig.engine.switchRate = { rate in
+            try await Task.sleep(for: delay)
+            if fail { throw OutputDeviceError.timedOut }
+            return rate
+        }
+    }
+
+    @Test func switchesTheRateAtTheJoinOnceTheTailPlayed() async throws {
+        let rig = try OfflineRig()
+        follow(rig)
+        let first = try rig.item("a", frames: 0..<24000) { _ in 0.5 }
+        rig.upcoming = [try rig.item("b", rate: 44100, frames: 0..<44100) { _ in 0.25 }]
+        try rig.engine.play(first)
+        try await rig.render(seconds: 1)
+        #expect(rig.captured.count { abs($0 - 0.5) < 1e-4 } == 24000)   // the whole first track
+        #expect(rig.engine.outputSampleRate == 44100 && rig.advanced == 1 && rig.engine.isPlaying)
+        #expect(rig.captured.suffix(1000).allSatisfy { abs($0 - 0.25) < 1e-3 })
+    }
+
+    @Test func staysGaplessWhenTheTargetRateIsTheSame() async throws {
+        let rig = try OfflineRig()
+        follow(rig)
+        let first = try rig.item("a", rate: 96000, frames: 0..<96000) { ToneFile.sine($0, rate: 96000) }
+        rig.upcoming = [try rig.item("b", rate: 192000, frames: 96000..<384000) { ToneFile.sine($0, rate: 192000) }]
+        try rig.engine.play(first)   // switches straight away
+        try await rig.render(seconds: 0.3)
+        #expect(rig.engine.outputSampleRate == 96000)
+        rig.meter.reset()
+        try await rig.render(seconds: 2.4)   // frames counted at 48 kHz: 1.2 s at 96 kHz
+        #expect(rig.advanced == 1 && rig.engine.outputSampleRate == 96000)   // 192 kHz plays at 96 kHz: no switch
+        #expect(rig.meter.reading.longestGapMs < 1 && rig.meter.reading.maxStep < 0.03)
+    }
+
+    @Test func playsAtTheOutputsRateWhenASwitchFails() async throws {
+        let rig = try OfflineRig()
+        follow(rig, fail: true)
+        try rig.engine.play(try rig.item("a", rate: 44100, frames: 0..<44100) { ToneFile.sine($0, rate: 44100) })
+        try await rig.render(seconds: 0.3)
+        #expect(rig.engine.switchFailure == "无法切换到 44.1 kHz" && rig.engine.outputSampleRate == 48000 && rig.engine.isPlaying)
+        #expect(rig.meter.reading.rmsDbfs > -12)
+    }
+
+    @Test func pauseSeekAndStopDuringASwitch() async throws {
+        let rig = try OfflineRig()
+        follow(rig, delay: .milliseconds(50))
+        let item = try rig.item("a", rate: 44100, frames: 0..<88200) { ToneFile.sine($0, rate: 44100) }
+        try rig.engine.play(item)
+        #expect(rig.engine.isSwitching)
+        try rig.engine.seek(to: 1)
+        rig.engine.pause()
+        try await rig.switched()
+        #expect(!rig.engine.isSwitching && !rig.engine.isPlaying && rig.engine.position == 1 && rig.engine.outputSampleRate == 44100)
+        try rig.engine.resume()
+        try await rig.render(seconds: 0.2)
+        #expect(rig.engine.isPlaying && rig.engine.position > 1)
+
+        try rig.engine.play(try rig.item("b", rate: 88200, frames: 0..<88200) { ToneFile.sine($0, rate: 88200) })
+        rig.engine.stop()   // before the device was asked: nothing to switch for
+        try await rig.switched()
+        #expect(rig.engine.current == nil && !rig.engine.isPlaying && rig.engine.outputSampleRate == 44100)
+    }
+
+    @Test func skippingDuringASwitchPlaysTheLastItemAtItsRate() async throws {
+        let rig = try OfflineRig()
+        follow(rig, delay: .milliseconds(50))
+        try rig.engine.play(try rig.item("a", rate: 44100, frames: 0..<44100) { ToneFile.sine($0, rate: 44100) })
+        let last = try rig.item("b", frames: 0..<48000) { ToneFile.sine($0) }
+        try rig.engine.play(last)
+        try await rig.switched()
+        #expect(rig.engine.current == last && rig.engine.isPlaying && rig.engine.outputSampleRate == 48000)
+        rig.meter.reset()
+        try await rig.render(seconds: 0.2)
+        #expect(rig.meter.reading.rmsDbfs > -12)
+    }
+
+    @Test func skippingBackToARateAlreadySwitchedToStillFollows() async throws {
+        let rig = try OfflineRig()
+        follow(rig, delay: .milliseconds(30))
+        let a = try rig.item("a", rate: 44100, frames: 0..<44100) { ToneFile.sine($0, rate: 44100) }
+        try rig.engine.play(a)
+        try await Task.sleep(for: .milliseconds(40))   // 44.1 kHz done, still in the switch loop's next turn
+        try rig.engine.play(try rig.item("b", rate: 96000, frames: 0..<96000) { ToneFile.sine($0, rate: 96000) })
+        try await Task.sleep(for: .milliseconds(10))
+        let c = try rig.item("c", rate: 44100, frames: 0..<44100) { ToneFile.sine($0, rate: 44100) }
+        try rig.engine.play(c)
+        try await rig.switched()
+        #expect(rig.engine.current == c && rig.engine.outputSampleRate == 44100 && rig.engine.switchFailure == nil)
     }
 
     @Test func pausesAndResumesInPlace() async throws {

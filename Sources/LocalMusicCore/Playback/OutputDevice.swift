@@ -55,6 +55,12 @@ public struct OutputDeviceInfo: Sendable, Equatable, Identifiable, Codable {
     }
 }
 
+public enum OutputDeviceError: Error {
+    case missing
+    case status(OSStatus)
+    case timedOut
+}
+
 public enum OutputDeviceChange: Sendable, Equatable {
     case list, defaultDevice, rate(String)
 }
@@ -68,6 +74,35 @@ public enum OutputDeviceChange: Sendable, Equatable {
     func bindingID(_ uid: String) -> AudioDeviceID?
     /// The rate the engine's graph runs at on this device; nil follows the hardware.
     func graphRate(_ uid: String) -> Double?
+    /// Sets the device's clock; the change arrives as `.rate(uid)`.
+    func setNominalRate(_ rate: Double, uid: String) throws
+}
+
+public enum RateChoice {
+    /// The device rate for a song's: its own if offered, else the highest offered one it divides or multiplies evenly
+    /// (192 kHz → 96 kHz, 176.4 → 88.2); nil when none does (switching would still resample).
+    public static func target(fileRate: Double, available: [Double]) -> Double? {
+        if available.contains(fileRate) { return fileRate }
+        func even(_ rate: Double) -> Bool {
+            let ratio = max(rate, fileRate) / min(rate, fileRate)
+            return abs(ratio - ratio.rounded()) < 1e-9
+        }
+        return available.filter(even).max()
+    }
+}
+
+/// The rate a device had before following songs changed it, restored when following stops, on quit, or on the next
+/// launch after a crash (only if the device is still at the rate set, so a user's own change is kept).
+public struct RateRestore: Codable, Equatable, Sendable {
+    public static let key = "outputRestore"
+
+    public let uid: String
+    public let originalRate: Double
+    public var setRate: Double
+
+    public init(uid: String, originalRate: Double, setRate: Double) {
+        (self.uid, self.originalRate, self.setRate) = (uid, originalRate, setRate)
+    }
 }
 
 /// Where playback goes, remembered in the `setting` table.
